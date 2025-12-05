@@ -326,8 +326,8 @@ def draw_gun_with_image(screen, gun, image, angle=0, is_charged=False):
     gun_color = (255, 100, 0) if is_charged else (255, 255, 0)
     pygame.draw.rect(screen, gun_color, rect, 2)
     if image is not None:
-        # Rotar la imagen según el ángulo de la mano
-        rotated_image = pygame.transform.rotate(image, angle)
+        # Rotar la imagen según el ángulo de la mano (invertir para que sea al revés)
+        rotated_image = pygame.transform.rotate(image, -angle)
         rotated_rect = rotated_image.get_rect(center=(cx, cy))
         screen.blit(rotated_image, rotated_rect)
 
