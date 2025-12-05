@@ -13,6 +13,14 @@
 # Versión 0.0.2
 # - Modificaciones: Aparición de cazador, proyectil, proyectil de la paloma
 
+# Descripción:
+# Este archivo contiene la práctica 3 del curso de Sistemas de Interacción
+# Persona-Computador. Es un pequeño juego construido con PyGame y Pymunk
+# en el que un "cazador" controla un arma usando gestos de la mano
+# detectados con MediaPipe Tasks (HandLandmarker). Las palomas aparecen
+# periódicamente, se animan con un par de sprites y pueden ser objetivo
+# de proyectiles creados por el jugador.
+
 
 import sys, random, time
 random.seed(1) # Hace que la simulación sea igual cada vez, más fácil de depurar
@@ -27,7 +35,14 @@ from mediapipe import solutions
 from mediapipe.framework.formats import landmark_pb2
 import numpy as np  # Para operaciones con arrays numéricos
 
+# Notas sobre dependencias:
+# - PyGame: render y eventos
+# - Pymunk: motor físico para proyectiles y objetos móviles
+# - OpenCV (cv2): captura de la cámara y conversión de frames
+# - MediaPipe Tasks: detección de mano en modo LIVE_STREAM
+
 # Tamaño de la pantalla
+# Dimensiones de la ventana (pixeles)
 display_h = 800
 display_w = 800
 
@@ -39,6 +54,7 @@ GUN_H = 30
 
 # Configuraciones de la simulación
 FPS = 50
+# Contador (en ticks) para controlar aparición de palomas
 TICKS_MIN = 1 * FPS  # 50 ticks (1 segundo)
 TICKS_MAX = 2 * FPS  # 100 ticks (2 segundos)
 
@@ -48,6 +64,10 @@ scale_height = 29 * 1.5
 
 # Animaciones de las palomas:
 FRAME_INTERVAL = FPS * 1.5 # Las palomas cambian de imagen cada 1.5 segundos
+
+# ---------------------------------------------------------------------
+# Configuración y helpers de MediaPipe Tasks (modelo HandLandmarker)
+# ---------------------------------------------------------------------
 
 # ========== INICIALIZAR MEDIAPIPE TASKS PARA DETECCIÓN DE MANOS ==========
 model_path = 'hand_landmarker.task'
@@ -63,10 +83,16 @@ detection_result = None
 hand_x = display_w // 2  # Posición inicial de la mano en el centro
 gun_rotation_angle = 0  # Ángulo de rotación del arma
 
+# Nota: `detection_result` es escrito por el callback de MediaPipe y leído
+# por el bucle principal para actualizar la lógica del juego.
+
 def get_result(result: HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
     """Callback para procesar los resultados de la detección de manos"""
     global detection_result
     detection_result = result
+
+
+# ---------- Funciones auxiliares para procesado de landmarks ----------
 
 
 def draw_landmarks_on_image(rgb_image, detection_result):
@@ -93,6 +119,8 @@ def draw_landmarks_on_image(rgb_image, detection_result):
     return annotated_image
 
 
+
+
 def is_hand_open(hand_landmarks):
     """Detecta si la mano está abierta calculando la distancia entre la muñeca y el dedo medio"""
     # En MediaPipe Tasks, hand_landmarks es una lista de NormalizedLandmark
@@ -105,6 +133,8 @@ def is_hand_open(hand_landmarks):
     
     # Si la distancia es negativa y el valor absoluto es mayor a 0.15, la mano está abierta
     return distance < -0.15
+
+
 
 
 def get_hand_rotation(hand_landmarks):
@@ -126,6 +156,13 @@ def get_hand_rotation(hand_landmarks):
     angle_pygame = -angle_deg - 90
     
     return angle_pygame
+
+
+# ---------------------------------------------------------------------
+# Funciones para crear y gestionar objetos en el espacio de Pymunk
+# Cada función retorna la "shape" que representa el objeto (contiene
+# referencia al body y atributos auxiliares para dibujado/animación).
+# ---------------------------------------------------------------------
 
 
 # Fucniones para añadir los objetos al espacio de pymunk
