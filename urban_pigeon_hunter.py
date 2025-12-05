@@ -27,6 +27,12 @@ import numpy as np  # Para operaciones con arrays numéricos
 display_h = 800
 display_w = 800
 
+# Tamaños del cazador y el arma (en píxeles)
+HUNTER_W = 20
+HUNTER_H = 60
+GUN_W = 10
+GUN_H = 30
+
 # Configuraciones de la simulación
 FPS = 50
 TICKS_MIN = 1 * FPS  # 50 ticks (1 segundo)
@@ -151,25 +157,31 @@ def add_proyectile(space, position): # Proyectil de la paloma
 
 def add_hunter(space): # Cazador de palomas
     mass = 10
-    width = 20
-    height = 60
+    width = HUNTER_W
+    height = HUNTER_H
     body = pymunk.Body(body_type=pymunk.Body.KINEMATIC) # Creamos el cuerpo del cazador cinemático
     body.position = display_w // 2, 50 # Fijamos su posición en el centro abajo de la pantalla
     shape = pymunk.Poly.create_box(body, (width, height)) # Creamos una forma rectangular para que el cuerpo pueda colisionar
     shape.mass = mass
-    shape.radius = width // 2  # Agregar atributo radius para las funciones de dibujo
+    # Guardar dimensiones para dibujo (ancho y alto en píxeles del cuerpo)
+    shape.width = width
+    shape.height = height
+    shape.draw_radius = width // 2  # atributo auxiliar (semántico)
     space.add(body, shape)
     return shape
 
 def add_gun(space, hunter):
     mass = 2
-    width = 10
-    height = 30
+    width = GUN_W
+    height = GUN_H
     body = pymunk.Body(body_type=pymunk.Body.KINEMATIC) # Creamos el cuerpo del arma cinemático
     body.position = hunter.body.position.x, hunter.body.position.y + 40 # Fijamos su posición encima del cazador
     shape = pymunk.Poly.create_box(body, (width, height)) # Creamos una forma rectangular para que el cuerpo pueda colisionar
     shape.mass = mass
-    shape.radius = width // 2  # Agregar atributo radius para las funciones de dibujo
+    # Guardar dimensiones para dibujo
+    shape.width = width
+    shape.height = height
+    shape.draw_radius = width // 2
     space.add(body, shape)
     return shape
 
@@ -199,20 +211,50 @@ def draw_proyectile_with_image(screen,proyectile,image):
     screen.blit(image, p)
 
 def draw_hunter(screen, hunter):
-    p = int(hunter.body.position.x), display_h - int(hunter.body.position.y)
-    pygame.draw.rect(screen, (0,255,0), (p[0] - hunter.radius, p[1] - hunter.radius, hunter.radius * 2, hunter.radius * 4), 2)
+    # Dibujar rectángulo del cazador usando sus dimensiones guardadas
+    cx = int(hunter.body.position.x)
+    cy = display_h - int(hunter.body.position.y)
+    w = int(getattr(hunter, 'width', 20))
+    h = int(getattr(hunter, 'height', 60))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    pygame.draw.rect(screen, (0,255,0), rect, 2)
 
 def draw_hunter_with_image(screen,hunter,image):
-    p = int(hunter.body.position.x - hunter.radius), (display_h - int(hunter.body.position.y))- hunter.radius
-    screen.blit(image, p)
+    # Dibujar rectángulo del cazador y superponer la imagen centrada
+    cx = int(hunter.body.position.x)
+    cy = display_h - int(hunter.body.position.y)
+    w = int(getattr(hunter, 'width', 20))
+    h = int(getattr(hunter, 'height', 60))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    # Dibujar rectángulo (borde)
+    pygame.draw.rect(screen, (0,255,0), rect, 2)
+    # Superponer imagen centrada en el rectángulo
+    if image is not None:
+        ix, iy = image.get_width(), image.get_height()
+        img_pos = (cx - ix // 2, cy - iy // 2)
+        screen.blit(image, img_pos)
 
 def draw_gun(screen, gun):
-    p = int(gun.body.position.x), display_h - int(gun.body.position.y)
-    pygame.draw.rect(screen, (255,255,0), (p[0] - gun.radius, p[1] - gun.radius, gun.radius * 2, gun.radius * 3), 2)
+    # Dibujar rectángulo del arma usando sus dimensiones guardadas
+    cx = int(gun.body.position.x)
+    cy = display_h - int(gun.body.position.y)
+    w = int(getattr(gun, 'width', 10))
+    h = int(getattr(gun, 'height', 30))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    pygame.draw.rect(screen, (255,255,0), rect, 2)
 
 def draw_gun_with_image(screen,gun,image):
-    p = int(gun.body.position.x - gun.radius), (display_h - int(gun.body.position.y))- gun.radius
-    screen.blit(image, p)
+    # Dibujar rectángulo del arma y superponer la imagen centrada
+    cx = int(gun.body.position.x)
+    cy = display_h - int(gun.body.position.y)
+    w = int(getattr(gun, 'width', 10))
+    h = int(getattr(gun, 'height', 30))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    pygame.draw.rect(screen, (255,255,0), rect, 2)
+    if image is not None:
+        ix, iy = image.get_width(), image.get_height()
+        img_pos = (cx - ix // 2, cy - iy // 2)
+        screen.blit(image, img_pos)
 
 def update_pidgeon_animation(pidgeon):
     pidgeon.animation_timer -= 1
@@ -252,14 +294,15 @@ def main():
     # Agrupamos las imágenes que componen el movimiento de la paloma que surge de la derecha
     right_pidgeon_frame = [image_rl_pidgeon_open, image_rl_pidgeon_close]
 
-    image_proyectile= pygame.image.load("basketball.png")
-    image_proyectile = pygame.transform.scale(image_proyectile,(5*2,5*2 ))
-    
-    image_hunter= pygame.image.load("basketball.png")
-    image_hunter = pygame.transform.scale(image_hunter,(20*2,60*2 ))
-    
-    image_gun= pygame.image.load("basketball.png")
-    image_gun = pygame.transform.scale(image_gun,(10*2,30*2 ))
+    image_proyectile = pygame.image.load("basketball.png")
+    image_proyectile = pygame.transform.scale(image_proyectile, (5*2, 5*2))
+
+    # Escalar las imágenes del cazador y del arma al cargarlas usando los tamaños definidos
+    image_hunter = pygame.image.load("basketball.png")
+    image_hunter = pygame.transform.scale(image_hunter, (HUNTER_W, HUNTER_H))
+
+    image_gun = pygame.image.load("basketball.png")
+    image_gun = pygame.transform.scale(image_gun, (GUN_W, GUN_H))
     
     # Inicializamos PyGame
     pygame.init()
