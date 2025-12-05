@@ -62,6 +62,8 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 detection_result = None
 hand_x = display_w // 2  # Posición inicial de la mano en el centro
 gun_rotation_angle = 0  # Ángulo de rotación del arma
+is_gun_charged = False  # Estado de carga del arma
+was_pinch_pressed = False  # Estado anterior del pellizco
 
 def get_result(result: HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
     """Callback para procesar los resultados de la detección de manos"""
@@ -291,23 +293,27 @@ def draw_hunter_with_image(screen,hunter,image):
         img_pos = (cx - ix // 2, cy - iy // 2)
         screen.blit(image, img_pos)
 
-def draw_gun(screen, gun, angle=0):
+def draw_gun(screen, gun, angle=0, is_charged=False):
     # Dibujar rectángulo del arma usando sus dimensiones guardadas
     cx = int(gun.body.position.x)
     cy = display_h - int(gun.body.position.y)
     w = int(getattr(gun, 'width', 10))
     h = int(getattr(gun, 'height', 30))
     rect = (cx - w // 2, cy - h // 2, w, h)
-    pygame.draw.rect(screen, (255,255,0), rect, 2)
+    # Cambiar color según si está cargado
+    gun_color = (255, 100, 0) if is_charged else (255, 255, 0)
+    pygame.draw.rect(screen, gun_color, rect, 2)
 
-def draw_gun_with_image(screen, gun, image, angle=0):
+def draw_gun_with_image(screen, gun, image, angle=0, is_charged=False):
     # Dibujar rectángulo del arma y superponer la imagen centrada
     cx = int(gun.body.position.x)
     cy = display_h - int(gun.body.position.y)
     w = int(getattr(gun, 'width', 10))
     h = int(getattr(gun, 'height', 30))
     rect = (cx - w // 2, cy - h // 2, w, h)
-    pygame.draw.rect(screen, (255,255,0), rect, 2)
+    # Cambiar color según si está cargado
+    gun_color = (255, 100, 0) if is_charged else (255, 255, 0)
+    pygame.draw.rect(screen, gun_color, rect, 2)
     if image is not None:
         # Rotar la imagen según el ángulo de la mano
         rotated_image = pygame.transform.rotate(image, angle)
@@ -449,13 +455,23 @@ def main():
                         # Calcular el ángulo de rotación del arma basado en la orientación de la mano
                         current_gun_rotation = get_hand_rotation(landmarks)
                     
-                    # Detectar gesto de pellizco (pulgar e índice juntos) para disparar
-                    if is_pinch_gesture(landmarks) and (current_frame - last_pinch_frame) > pinch_cooldown:
-                        # Disparar un proyectil desde la posición del arma
+                    # Detectar gesto de pellizco (pulgar e índice juntos)
+                    current_pinch = is_pinch_gesture(landmarks)
+                    
+                    # Si está haciendo pellizco, cargar el arma
+                    if current_pinch:
+                        is_gun_charged = True
+                    
+                    # Si estaba haciendo pellizco pero ahora soltó, disparar
+                    if was_pinch_pressed and not current_pinch and is_gun_charged:
                         gun_pos = (int(gun_shape.body.position.x), int(gun_shape.body.position.y))
                         projectile = add_projectile_from_gun(space, gun_pos, current_gun_rotation)
                         projectiles.append(projectile)
+                        is_gun_charged = False
                         last_pinch_frame = current_frame
+                    
+                    # Actualizar el estado anterior del pellizco
+                    was_pinch_pressed = current_pinch
             
             # Actualizar posición del cazador y el arma
             hunter_shape.body.position = current_hand_x, hunter_shape.body.position.y
@@ -505,8 +521,8 @@ def main():
             # Dibujamos el cazador y el arma
             draw_hunter(screen, hunter_shape)
             draw_hunter_with_image(screen, hunter_shape, image_hunter)
-            draw_gun(screen, gun_shape, current_gun_rotation)
-            draw_gun_with_image(screen, gun_shape, image_gun, current_gun_rotation)
+            draw_gun(screen, gun_shape, current_gun_rotation, is_gun_charged)
+            draw_gun_with_image(screen, gun_shape, image_gun, current_gun_rotation, is_gun_charged)
 
             # Actualiza la ventana de visualización
             pygame.display.flip()
