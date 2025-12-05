@@ -61,6 +61,7 @@ VisionRunningMode = mp.tasks.vision.RunningMode
 # Variable global para almacenar el resultado de la detección
 detection_result = None
 hand_x = display_w // 2  # Posición inicial de la mano en el centro
+gun_rotation_angle = 0  # Ángulo de rotación del arma
 
 def get_result(result: HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
     """Callback para procesar los resultados de la detección de manos"""
@@ -104,6 +105,27 @@ def is_hand_open(hand_landmarks):
     
     # Si la distancia es negativa y el valor absoluto es mayor a 0.15, la mano está abierta
     return distance < -0.15
+
+
+def get_hand_rotation(hand_landmarks):
+    """Calcula el ángulo de rotación de la mano basado en la orientación de los dedos"""
+    import math
+    # Usar la muñeca (0) y el dedo índice (6) para calcular la rotación
+    wrist = hand_landmarks[0]
+    index_finger_pip = hand_landmarks[6]  # Articulación PIP del índice
+    
+    # Calcular el vector desde la muñeca al dedo índice
+    dx = index_finger_pip.x - wrist.x
+    dy = index_finger_pip.y - wrist.y
+    
+    # Calcular el ángulo en radianes y convertir a grados
+    angle_rad = math.atan2(dy, dx)
+    angle_deg = math.degrees(angle_rad)
+    
+    # Ajustar el ángulo para Pygame
+    angle_pygame = -angle_deg - 90
+    
+    return angle_pygame
 
 
 # Fucniones para añadir los objetos al espacio de pymunk
@@ -224,7 +246,7 @@ def draw_hunter_with_image(screen,hunter,image):
         img_pos = (cx - ix // 2, cy - iy // 2)
         screen.blit(image, img_pos)
 
-def draw_gun(screen, gun):
+def draw_gun(screen, gun, angle=0):
     # Dibujar rectángulo del arma usando sus dimensiones guardadas
     cx = int(gun.body.position.x)
     cy = display_h - int(gun.body.position.y)
@@ -233,7 +255,7 @@ def draw_gun(screen, gun):
     rect = (cx - w // 2, cy - h // 2, w, h)
     pygame.draw.rect(screen, (255,255,0), rect, 2)
 
-def draw_gun_with_image(screen,gun,image):
+def draw_gun_with_image(screen, gun, image, angle=0):
     # Dibujar rectángulo del arma y superponer la imagen centrada
     cx = int(gun.body.position.x)
     cy = display_h - int(gun.body.position.y)
@@ -242,9 +264,10 @@ def draw_gun_with_image(screen,gun,image):
     rect = (cx - w // 2, cy - h // 2, w, h)
     pygame.draw.rect(screen, (255,255,0), rect, 2)
     if image is not None:
-        ix, iy = image.get_width(), image.get_height()
-        img_pos = (cx - ix // 2, cy - iy // 2)
-        screen.blit(image, img_pos)
+        # Rotar la imagen según el ángulo de la mano
+        rotated_image = pygame.transform.rotate(image, angle)
+        rotated_rect = rotated_image.get_rect(center=(cx, cy))
+        screen.blit(rotated_image, rotated_rect)
 
 def update_pidgeon_animation(pidgeon):
     pidgeon.animation_timer -= 1
@@ -369,6 +392,9 @@ def main():
                         hand_x = int(wrist.x * display_w)
                         # Limitar dentro de los bordes
                         hand_x = max(30, min(display_w - 30, hand_x))
+                        
+                        # Calcular el ángulo de rotación del arma basado en la orientación de la mano
+                        gun_rotation_angle = get_hand_rotation(landmarks)
             
             # Actualizar posición del cazador y el arma
             hunter_shape.body.position = hand_x, hunter_shape.body.position.y
@@ -402,8 +428,8 @@ def main():
             # Dibujamos el cazador y el arma
             draw_hunter(screen, hunter_shape)
             draw_hunter_with_image(screen, hunter_shape, image_hunter)
-            draw_gun(screen, gun_shape)
-            draw_gun_with_image(screen, gun_shape, image_gun)
+            draw_gun(screen, gun_shape, gun_rotation_angle)
+            draw_gun_with_image(screen, gun_shape, image_gun, gun_rotation_angle)
 
             # Actualiza la ventana de visualización
             pygame.display.flip()
