@@ -181,18 +181,31 @@ def add_proyectile(space, position): # Proyectil de la paloma
     return shape
 
 def add_projectile_from_gun(space, gun_position, gun_rotation):
-    """Crear un proyectil disparado desde el arma"""
+    """Crear un proyectil disparado desde el arma según su ángulo"""
     import math
     mass = 1
     radius = 5
     body = pymunk.Body(body_type=pymunk.Body.DYNAMIC)
     body.position = gun_position
     
-    # Calcular la velocidad basada en el ángulo del arma
-    # gun_rotation está en grados, convertir a radianes
+    # El ángulo gun_rotation viene de get_hand_rotation que ya está ajustado para Pygame
+    # pero en Pygame, 0° es hacia la derecha y 90° es hacia abajo
+    # Para pymunk, necesitamos convertir: 0° arriba → 90° derecha → 180° abajo → 270° izquierda
+    # Convertir el ángulo a radianes para cálculos matemáticos
     angle_rad = math.radians(gun_rotation)
+    
+    # Calcular velocidad del proyectil
     projectile_speed = 400
-    body.velocity = (projectile_speed * math.cos(angle_rad), projectile_speed * math.sin(angle_rad))
+    
+    # En Pygame/Pygame-util: 
+    # angle 0° apunta a la derecha (cos(0)=1, sin(0)=0)
+    # angle 90° apunta hacia abajo (cos(90)=0, sin(90)=1)
+    # Para pymunk donde Y aumenta hacia arriba:
+    # Necesitamos invertir el eje Y
+    vx = projectile_speed * math.cos(angle_rad)
+    vy = -projectile_speed * math.sin(angle_rad)  # Negativo porque pymunk tiene Y invertido
+    
+    body.velocity = (vx, vy)
     
     shape = pymunk.Circle(body, radius)
     shape.mass = mass
