@@ -406,6 +406,8 @@ def main():
     # Variables locales para el loop
     current_hand_x = hand_x
     current_gun_rotation = 0
+    is_gun_charged = False  # Estado de carga del arma (local)
+    was_pinch_pressed = False  # Estado anterior del pellizco (local)
     
     with HandLandmarker.create_from_options(options) as landmarker:
         running = True
@@ -458,12 +460,17 @@ def main():
                     # Detectar gesto de pellizco (pulgar e índice juntos)
                     current_pinch = is_pinch_gesture(landmarks)
                     
+                    # Debug: mostrar estado del pellizco
+                    if current_pinch:
+                        print(f"Frame {current_frame}: Pellizco detectado - Arma cargada")
+                    
                     # Si está haciendo pellizco, cargar el arma
                     if current_pinch:
                         is_gun_charged = True
                     
                     # Si estaba haciendo pellizco pero ahora soltó, disparar
                     if was_pinch_pressed and not current_pinch and is_gun_charged:
+                        print(f"Frame {current_frame}: Pellizco soltado - DISPARANDO")
                         gun_pos = (int(gun_shape.body.position.x), int(gun_shape.body.position.y))
                         projectile = add_projectile_from_gun(space, gun_pos, current_gun_rotation)
                         projectiles.append(projectile)
