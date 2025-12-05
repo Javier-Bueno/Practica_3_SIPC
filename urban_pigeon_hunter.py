@@ -124,10 +124,29 @@ def get_hand_rotation(hand_landmarks):
     angle_rad = math.atan2(dy, dx)
     angle_deg = math.degrees(angle_rad)
     
-    # Ajustar el ángulo para Pygame
+    # Ajustar el ángulo para Pygame (para visualización)
     angle_pygame = -angle_deg - 90
     
     return angle_pygame
+
+
+def get_hand_rotation_raw(hand_landmarks):
+    """Calcula el ángulo de rotación de la mano en radianes (sin ajustes) para cálculos de física"""
+    import math
+    # Usar la muñeca (0) y el dedo índice (6) para calcular la rotación
+    wrist = hand_landmarks[0]
+    index_finger_pip = hand_landmarks[6]  # Articulación PIP del índice
+    
+    # Calcular el vector desde la muñeca al dedo índice
+    dx = index_finger_pip.x - wrist.x
+    dy = index_finger_pip.y - wrist.y
+    
+    # Calcular el ángulo en radianes
+    # En coordenadas de cámara (MediaPipe): X va a la derecha, Y va hacia abajo
+    # atan2(dy, dx) nos da: 0° a la derecha, 90° hacia abajo, -90° hacia arriba
+    angle_rad = math.atan2(-dy, dx)  # Negamos dy porque en pymunk Y va hacia arriba
+    
+    return angle_rad
 
 
 def is_pinch_gesture(hand_landmarks):
@@ -182,7 +201,7 @@ def add_proyectile(space, position): # Proyectil de la paloma
     space.add(body, shape)
     return shape
 
-def add_projectile_from_gun(space, gun_position, gun_rotation):
+def add_projectile_from_gun(space, gun_position, hand_landmarks):
     """Crear un proyectil disparado desde el arma según su ángulo"""
     import math
     mass = 1
@@ -190,22 +209,15 @@ def add_projectile_from_gun(space, gun_position, gun_rotation):
     body = pymunk.Body(body_type=pymunk.Body.DYNAMIC)
     body.position = gun_position
     
-    # El ángulo gun_rotation viene de get_hand_rotation que ya está ajustado para Pygame
-    # pero en Pygame, 0° es hacia la derecha y 90° es hacia abajo
-    # Para pymunk, necesitamos convertir: 0° arriba → 90° derecha → 180° abajo → 270° izquierda
-    # Convertir el ángulo a radianes para cálculos matemáticos
-    angle_rad = math.radians(gun_rotation)
+    # Obtener el ángulo en radianes para cálculos de física
+    angle_rad = get_hand_rotation_raw(hand_landmarks)
     
     # Calcular velocidad del proyectil
     projectile_speed = 400
     
-    # En Pygame/Pygame-util: 
-    # angle 0° apunta a la derecha (cos(0)=1, sin(0)=0)
-    # angle 90° apunta hacia abajo (cos(90)=0, sin(90)=1)
-    # Para pymunk donde Y aumenta hacia arriba:
-    # Necesitamos invertir el eje Y
+    # Calcular componentes de velocidad
     vx = projectile_speed * math.cos(angle_rad)
-    vy = -projectile_speed * math.sin(angle_rad)  # Negativo porque pymunk tiene Y invertido
+    vy = projectile_speed * math.sin(angle_rad)
     
     body.velocity = (vx, vy)
     
@@ -472,7 +484,7 @@ def main():
                     if was_pinch_pressed and not current_pinch and is_gun_charged:
                         print(f"Frame {current_frame}: Pellizco soltado - DISPARANDO")
                         gun_pos = (int(gun_shape.body.position.x), int(gun_shape.body.position.y))
-                        projectile = add_projectile_from_gun(space, gun_pos, current_gun_rotation)
+                        projectile = add_projectile_from_gun(space, gun_pos, landmarks)
                         projectiles.append(projectile)
                         is_gun_charged = False
                         last_pinch_frame = current_frame
