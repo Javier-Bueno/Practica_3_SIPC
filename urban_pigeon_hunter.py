@@ -19,6 +19,9 @@ random.seed(1) # Hace que la simulación sea igual cada vez, más fácil de depu
 import pygame
 import pymunk
 import pymunk.pygame_util
+import cv2  # Para captura de video desde la cámara
+import mediapipe as mp  # Para detección de manos
+import numpy as np  # Para operaciones con arrays numéricos
 
 # Tamaño de la pantalla
 display_h = 800
@@ -35,6 +38,77 @@ scale_height = 29 * 1.5
 
 # Animaciones de las palomas:
 FRAME_INTERVAL = FPS * 1.5 # Las palomas cambian de imagen cada 1.5 segundos
+
+# ========== INICIALIZAR MEDIAPIPE PARA DETECCIÓN DE MANOS ==========
+mp_hands = mp.solutions.hands  # Solución de MediaPipe para detección de manos
+hands = mp_hands.Hands(  # Crear detector de manos con parámetros específicos
+    static_image_mode=False,  # Modo dinámico para video en tiempo real
+    max_num_hands=1,  # Detectar solo 1 mano
+    min_detection_confidence=0.7,  # Confianza mínima del 70% para detección
+    min_tracking_confidence=0.7  # Confianza mínima del 70% para seguimiento
+)
+mp_drawing = mp.solutions.drawing_utils  # Utilidades para dibujar los puntos de la mano
+
+# Captura de video
+cap = cv2.VideoCapture(0)  # Abrir cámara web (índice 0 = cámara por defecto)
+hand_x = display_w // 2  # Posición inicial de la mano en el centro
+
+# Función para detectar si la mano está abierta
+def is_hand_open(hand_landmarks):
+    """Detecta si la mano está abierta calculando la distancia entre los dedos"""
+    # Puntos de referencia clave (landmarks)
+    wrist = hand_landmarks.landmark[0]  # Muñeca
+    middle_finger_tip = hand_landmarks.landmark[12]  # Punta del dedo medio
+    
+    # Calcular distancia vertical entre muñeca y punta del dedo medio
+    # Si la distancia es grande, la mano está abierta
+    distance = middle_finger_tip.y - wrist.y
+    
+    # Si la distancia es negativa y el valor absoluto es mayor a 0.15, la mano está abierta
+    return distance < -0.15
+
+def get_hand_position():
+    """Detecta la posición de la mano abierta usando MediaPipe"""
+    global hand_x
+    
+    # Capturar frame de la cámara
+    ret, frame = cap.read()
+    if not ret:
+        return hand_x
+    
+    # Voltear la imagen horizontalmente para efecto espejo
+    frame = cv2.flip(frame, 1)
+    h, w, c = frame.shape
+    
+    # Convertir BGR a RGB (OpenCV usa BGR, MediaPipe usa RGB)
+    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+    
+    # Detectar manos
+    results = hands.process(rgb_frame)
+    
+    # Si se detecta una mano abierta, obtener su posición
+    if results.multi_hand_landmarks:
+        hand_landmarks = results.multi_hand_landmarks[0]
+        
+        # Verificar si la mano está abierta
+        if is_hand_open(hand_landmarks):
+            # Usar el punto de la muñeca/palma (punto 0) para controlar el juego
+            palm_center = hand_landmarks.landmark[0]
+            # Convertir coordenadas normalizadas a píxeles del juego
+            hand_x = int(palm_center.x * display_w)
+            # Limitar dentro de los bordes
+            hand_x = max(30, min(display_w - 30, hand_x))
+    
+    # Mostrar el video con la detección de mano
+    if results.multi_hand_landmarks:
+        for hand_landmarks in results.multi_hand_landmarks:
+            mp_drawing.draw_landmarks(frame, hand_landmarks, mp_hands.HAND_CONNECTIONS)
+    
+    # Mostrar frame con detección
+    cv2.imshow('Hand Detection', frame)
+    cv2.waitKey(1)
+    
+    return hand_x
 
 # Fucniones para añadir los objetos al espacio de pymunk
 def add_lr_pidgeon(space): # Paloma que aparece por la izquierda y desaparece por la derecha
@@ -83,6 +157,7 @@ def add_hunter(space): # Cazador de palomas
     body.position = display_w // 2, 50 # Fijamos su posición en el centro abajo de la pantalla
     shape = pymunk.Poly.create_box(body, (width, height)) # Creamos una forma rectangular para que el cuerpo pueda colisionar
     shape.mass = mass
+    shape.radius = width // 2  # Agregar atributo radius para las funciones de dibujo
     space.add(body, shape)
     return shape
 
@@ -94,6 +169,7 @@ def add_gun(space, hunter):
     body.position = hunter.body.position.x, hunter.body.position.y + 40 # Fijamos su posición encima del cazador
     shape = pymunk.Poly.create_box(body, (width, height)) # Creamos una forma rectangular para que el cuerpo pueda colisionar
     shape.mass = mass
+    shape.radius = width // 2  # Agregar atributo radius para las funciones de dibujo
     space.add(body, shape)
     return shape
 
@@ -190,7 +266,7 @@ def main():
     # Definimos el tamaño (en píxeles) de la ventana de visualización en PyGame
     screen = pygame.display.set_mode((display_w, display_h))
     # Añadimos un título a la ventana
-    pygame.display.set_caption("El destino de la humanidad depende de ti. ¡Acaba con las palomas marroquíes!")
+    pygame.display.set_caption("El destino de la humanidad depende de ti. ¡Acaba con las palomas urbanas!")
     clock = pygame.time.Clock()
     # Inicializamos el espacio en pymunk
     space = pymunk.Space()
@@ -204,6 +280,9 @@ def main():
     pidgeons = []
     #draw_options = pymunk.pygame_util.DrawOptions(screen)
 
+    # Crear el cazador y el arma
+    hunter_shape = add_hunter(space)
+    gun_shape = add_gun(space, hunter_shape)
 
     ticks_to_next_pidgeon = 10
     while True:
@@ -212,6 +291,11 @@ def main():
                 sys.exit(0)
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                 sys.exit(0)
+        
+        # Obtener la posición de la mano abierta y controlar el cazador
+        hand_x = get_hand_position()
+        hunter_shape.body.position = hand_x, hunter_shape.body.position.y
+        gun_shape.body.position = hand_x, gun_shape.body.position.y
  
         ticks_to_next_pidgeon -= 1   # Decrementamos el contador de ticks para la siguiente paloma
         if ticks_to_next_pidgeon <= 0:  # Si ha llegado a cero, añadimos una nueva paloma
@@ -239,6 +323,12 @@ def main():
         for pidgeon in pidgeons_to_remove:
             space.remove(pidgeon, pidgeon.body)
             pidgeons.remove(pidgeon)
+
+        # Dibujamos el cazador y el arma
+        draw_hunter(screen, hunter_shape)
+        draw_hunter_with_image(screen, hunter_shape, image_hunter)
+        draw_gun(screen, gun_shape)
+        draw_gun_with_image(screen, gun_shape, image_gun)
 
         #space.debug_draw(draw_options)
 
