@@ -14,15 +14,17 @@
 # - Modificaciones: Aparición de cazador, proyectil, proyectil de la paloma
 
 
-import sys, random
+import sys, random, time
 random.seed(1) # Hace que la simulación sea igual cada vez, más fácil de depurar
 import pygame
 import pymunk
 import pymunk.pygame_util
 import cv2  # Para captura de video desde la cámara
+import mediapipe as mp
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
-import mediapipe as mp  # Para utilidades de dibujo
+from mediapipe import solutions
+from mediapipe.framework.formats import landmark_pb2
 import numpy as np  # Para operaciones con arrays numéricos
 
 # Tamaño de la pantalla
@@ -48,46 +50,50 @@ scale_height = 29 * 1.5
 FRAME_INTERVAL = FPS * 1.5 # Las palomas cambian de imagen cada 1.5 segundos
 
 # ========== INICIALIZAR MEDIAPIPE TASKS PARA DETECCIÓN DE MANOS ==========
-Base_options = python.BaseOptions
-HandLandmarker = vision.HandLandmarker
-HandLandmarkerOptions = vision.HandLandmarkerOptions
-VisionRunningMode = vision.RunningMode
+model_path = 'hand_landmarker.task'
 
-# Crear opciones para HandLandmarker
-options = HandLandmarkerOptions(
-    base_options=Base_options(model_asset_path='hand_landmarker.task'),
-    running_mode=VisionRunningMode.LIVE_STREAM,
-    num_hands=1,
-    min_hand_detection_confidence=0.7,
-    min_hand_presence_confidence=0.7,
-    min_tracking_confidence=0.7
-)
+BaseOptions = mp.tasks.BaseOptions
+HandLandmarker = mp.tasks.vision.HandLandmarker
+HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
+HandLandmarkerResult = mp.tasks.vision.HandLandmarkerResult
+VisionRunningMode = mp.tasks.vision.RunningMode
 
-# Crear el detector de manos
-landmarker = HandLandmarker.create_from_options(options)
-mp_drawing = mp.solutions.drawing_utils  # Utilidades para dibujar los puntos de la mano
-
-# Captura de video
-cap = cv2.VideoCapture(0)  # Abrir cámara web (índice 0 = cámara por defecto)
+# Variable global para almacenar el resultado de la detección
+detection_result = None
 hand_x = display_w // 2  # Posición inicial de la mano en el centro
 
-# Función para detectar si la mano está abierta (compatible con mediapipe.solutions)
-def is_hand_open(hand_landmarks):
-    """Detecta si la mano está abierta calculando la distancia entre los dedos"""
-    # Puntos de referencia clave (landmarks)
-    wrist = hand_landmarks.landmark[0]  # Muñeca
-    middle_finger_tip = hand_landmarks.landmark[12]  # Punta del dedo medio
-    
-    # Calcular distancia vertical entre muñeca y punta del dedo medio
-    # Si la distancia es grande, la mano está abierta
-    distance = middle_finger_tip.y - wrist.y
-    
-    # Si la distancia es negativa y el valor absoluto es mayor a 0.15, la mano está abierta
-    return distance < -0.15
+def get_result(result: HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
+    """Callback para procesar los resultados de la detección de manos"""
+    global detection_result
+    detection_result = result
 
-# Función para detectar si la mano está abierta (compatible con MediaPipe Tasks)
-def is_hand_open_tasks(hand_landmarks):
-    """Detecta si la mano está abierta usando landmarks de MediaPipe Tasks (lista de NormalizedLandmark)"""
+
+def draw_landmarks_on_image(rgb_image, detection_result):
+    """Dibuja los landmarks de las manos en la imagen"""
+    hand_landmarks_list = detection_result.hand_landmarks
+    annotated_image = np.copy(rgb_image)
+
+    # Iterar sobre las manos detectadas
+    for idx in range(len(hand_landmarks_list)):
+        hand_landmarks = hand_landmarks_list[idx]
+        
+        # Dibujar los landmarks de la mano
+        hand_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+        hand_landmarks_proto.landmark.extend([
+            landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in hand_landmarks
+        ])
+        solutions.drawing_utils.draw_landmarks(
+            annotated_image,
+            hand_landmarks_proto,
+            solutions.hands.HAND_CONNECTIONS,
+            solutions.drawing_styles.get_default_hand_landmarks_style(),
+            solutions.drawing_styles.get_default_hand_connections_style())
+
+    return annotated_image
+
+
+def is_hand_open(hand_landmarks):
+    """Detecta si la mano está abierta calculando la distancia entre la muñeca y el dedo medio"""
     # En MediaPipe Tasks, hand_landmarks es una lista de NormalizedLandmark
     # Índice 0 = muñeca, Índice 12 = punta del dedo medio
     wrist = hand_landmarks[0]
@@ -99,55 +105,6 @@ def is_hand_open_tasks(hand_landmarks):
     # Si la distancia es negativa y el valor absoluto es mayor a 0.15, la mano está abierta
     return distance < -0.15
 
-def get_hand_position():
-    """Detecta la posición de la mano abierta usando MediaPipe Tasks HandLandmarker"""
-    global hand_x, landmarker
-    import time
-    
-    # Capturar frame de la cámara
-    ret, frame = cap.read()
-    if not ret:
-        return hand_x
-    
-    # Voltear la imagen horizontalmente para efecto espejo
-    frame = cv2.flip(frame, 1)
-    h, w, c = frame.shape
-    
-    # Convertir BGR a RGB (OpenCV usa BGR, MediaPipe usa RGB)
-    rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    
-    # Convertir a formato de imagen de MediaPipe Tasks
-    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
-    
-    # Detectar manos con timestamp
-    timestamp_ms = int(time.time() * 1000)
-    results = landmarker.detect_for_video(mp_image, timestamp_ms)
-    
-    # Si se detecta una mano abierta, obtener su posición
-    if results.hand_landmarks:
-        hand_landmarks = results.hand_landmarks[0]  # Primera (única) mano
-        
-        # Verificar si la mano está abierta
-        if is_hand_open_tasks(hand_landmarks):
-            # Usar el punto de la muñeca/palma (punto 0) para controlar el juego
-            palm_center = hand_landmarks[0]
-            # Convertir coordenadas normalizadas a píxeles del juego
-            hand_x = int(palm_center.x * display_w)
-            # Limitar dentro de los bordes
-            hand_x = max(30, min(display_w - 30, hand_x))
-        
-        # Dibujar puntos de la mano en el frame (opcional, para debugging)
-        if results.hand_landmarks:
-            for landmark in hand_landmarks:
-                x = int(landmark.x * w)
-                y = int(landmark.y * h)
-                cv2.circle(frame, (x, y), 2, (0, 255, 0), -1)
-    
-    # Mostrar frame con detección
-    cv2.imshow('Hand Detection', frame)
-    cv2.waitKey(1)
-    
-    return hand_x
 
 # Fucniones para añadir los objetos al espacio de pymunk
 def add_lr_pidgeon(space): # Paloma que aparece por la izquierda y desaparece por la derecha
@@ -354,65 +311,114 @@ def main():
     
 
     pidgeons = []
-    #draw_options = pymunk.pygame_util.DrawOptions(screen)
 
     # Crear el cazador y el arma
     hunter_shape = add_hunter(space)
     gun_shape = add_gun(space, hunter_shape)
 
     ticks_to_next_pidgeon = 10
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                sys.exit(0)
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                sys.exit(0)
+    
+    # Configurar MediaPipe Tasks
+    options = HandLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=model_path),
+        running_mode=VisionRunningMode.LIVE_STREAM,
+        result_callback=get_result)
+
+    cap = cv2.VideoCapture(0)
+    global hand_x, detection_result
+    
+    with HandLandmarker.create_from_options(options) as landmarker:
+        running = True
+        frame_count = 0
         
-        # Obtener la posición de la mano abierta y controlar el cazador
-        hand_x = get_hand_position()
-        hunter_shape.body.position = hand_x, hunter_shape.body.position.y
-        gun_shape.body.position = hand_x, gun_shape.body.position.y
- 
-        ticks_to_next_pidgeon -= 1   # Decrementamos el contador de ticks para la siguiente paloma
-        if ticks_to_next_pidgeon <= 0:  # Si ha llegado a cero, añadimos una nueva paloma
-            ticks_to_next_pidgeon = random.randint(TICKS_MIN, TICKS_MAX)  # Reiniciamos el contador de ticks para que tarde de 1 a 2 s en cargar una paloma
-            pidgeon_shape = add_lr_pidgeon(space)     # Añadimos la paloma al espacio
-            pidgeons.append(pidgeon_shape)     # Y la añadimos a la lista de palomas
-        
-        # La función 'step' hace avanzar la simulación un paso (en seg.) en el tiempo cada vez que se la llama.
-        # Es mejor usar un paso constante y no ajustarlo en función de lo que tarde cada iteración del bucle. 
-        # Debe estar coordinado con lo FPS definidos en PyGame.
-        space.step(1/FPS)
+        while running and cap.isOpened():
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    running = False
+            
+            # Capturar frame de la cámara
+            success, image = cap.read()
+            if not success:
+                print("Ignoring empty camera frame.")
+                continue
+            
+            image = cv2.flip(image, 1)
+            h, w, c = image.shape
+            
+            # Convertir a formato de MediaPipe
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            
+            # Detectar manos
+            frame_timestamp_ms = int(time.time() * 1000)
+            landmarker.detect_async(mp_image, frame_timestamp_ms)
+            
+            # Procesar resultados de detección
+            if detection_result is not None:
+                image_annotated = draw_landmarks_on_image(mp_image.numpy_view(), detection_result)
+                
+                if len(detection_result.hand_landmarks) > 0:
+                    landmarks = detection_result.hand_landmarks[0]
+                    
+                    # Verificar si la mano está abierta
+                    if is_hand_open(landmarks):
+                        # Usar la muñeca para controlar el cazador
+                        wrist = landmarks[0]
+                        # Convertir coordenadas normalizadas a píxeles del juego
+                        hand_x = int(wrist.x * display_w)
+                        # Limitar dentro de los bordes
+                        hand_x = max(30, min(display_w - 30, hand_x))
+            
+            # Actualizar posición del cazador y el arma
+            hunter_shape.body.position = hand_x, hunter_shape.body.position.y
+            gun_shape.body.position = hand_x, gun_shape.body.position.y
+            
+            ticks_to_next_pidgeon -= 1   # Decrementamos el contador de ticks para la siguiente paloma
+            if ticks_to_next_pidgeon <= 0:  # Si ha llegado a cero, añadimos una nueva paloma
+                ticks_to_next_pidgeon = random.randint(TICKS_MIN, TICKS_MAX)  # Reiniciamos el contador de ticks
+                pidgeon_shape = add_lr_pidgeon(space)     # Añadimos la paloma al espacio
+                pidgeons.append(pidgeon_shape)     # Y la añadimos a la lista de palomas
+            
+            # La función 'step' hace avanzar la simulación un paso (en seg.) en el tiempo cada vez que se la llama.
+            space.step(1/FPS)
 
-        # Rellenamos la ventana con un fondo blanco
-        screen.fill((255,255,255))
+            # Rellenamos la ventana con un fondo blanco
+            screen.fill((255,255,255))
 
-        pidgeons_to_remove = []  # Lista para almacenar las palomas que deben ser eliminadas
-         # Dibujamos las palomas
-        for pidgeon in pidgeons:
-            update_pidgeon_animation(pidgeon)
-            draw_pidgeon(screen,pidgeon)
-            draw_pidgeon_with_image(screen,pidgeon, left_pidgeon_frame, right_pidgeon_frame)
-            if pidgeon.body.position.x > 850 or pidgeon.body.position.x < -50:   # Si la paloma sale de la pantalla, la marcamos para eliminarla
-                pidgeons_to_remove.append(pidgeon)
-        # Eliminamos las palomas que han salido de la pantalla        
-        for pidgeon in pidgeons_to_remove:
-            space.remove(pidgeon, pidgeon.body)
-            pidgeons.remove(pidgeon)
+            pidgeons_to_remove = []  # Lista para almacenar las palomas que deben ser eliminadas
+             # Dibujamos las palomas
+            for pidgeon in pidgeons:
+                update_pidgeon_animation(pidgeon)
+                draw_pidgeon(screen,pidgeon)
+                draw_pidgeon_with_image(screen,pidgeon, left_pidgeon_frame, right_pidgeon_frame)
+                if pidgeon.body.position.x > 850 or pidgeon.body.position.x < -50:   # Si la paloma sale de la pantalla, la marcamos para eliminarla
+                    pidgeons_to_remove.append(pidgeon)
+            # Eliminamos las palomas que han salido de la pantalla        
+            for pidgeon in pidgeons_to_remove:
+                space.remove(pidgeon, pidgeon.body)
+                pidgeons.remove(pidgeon)
 
-        # Dibujamos el cazador y el arma
-        draw_hunter(screen, hunter_shape)
-        draw_hunter_with_image(screen, hunter_shape, image_hunter)
-        draw_gun(screen, gun_shape)
-        draw_gun_with_image(screen, gun_shape, image_gun)
+            # Dibujamos el cazador y el arma
+            draw_hunter(screen, hunter_shape)
+            draw_hunter_with_image(screen, hunter_shape, image_hunter)
+            draw_gun(screen, gun_shape)
+            draw_gun_with_image(screen, gun_shape, image_gun)
 
-        #space.debug_draw(draw_options)
+            # Actualiza la ventana de visualización
+            pygame.display.flip()
 
-        # Actualiza la ventana de visualización. Muestra todo lo que se dibujó en este frame.
-        pygame.display.flip()
+            # Mostrar frame de OpenCV con landmarks
+            cv2.imshow('Hand Detection', image_annotated if detection_result is not None else image)
+            if cv2.waitKey(5) & 0xFF == 27:
+                running = False
 
-        # Limita la velocidad del juego a 50 FPS
-        clock.tick(FPS)
+            # Limita la velocidad del juego a 50 FPS
+            clock.tick(FPS)
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    pygame.quit()
 
 if __name__ == '__main__':
     sys.exit(main())
