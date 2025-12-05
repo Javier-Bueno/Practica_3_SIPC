@@ -14,15 +14,28 @@
 # - Modificaciones: Aparición de cazador, proyectil, proyectil de la paloma
 
 
-import sys, random
+import sys, random, time
 random.seed(1) # Hace que la simulación sea igual cada vez, más fácil de depurar
 import pygame
 import pymunk
 import pymunk.pygame_util
+import cv2  # Para captura de video desde la cámara
+import mediapipe as mp
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+from mediapipe import solutions
+from mediapipe.framework.formats import landmark_pb2
+import numpy as np  # Para operaciones con arrays numéricos
 
 # Tamaño de la pantalla
 display_h = 800
 display_w = 800
+
+# Tamaños del cazador y el arma (en píxeles)
+HUNTER_W = 20
+HUNTER_H = 60
+GUN_W = 10
+GUN_H = 30
 
 # Configuraciones de la simulación
 FPS = 50
@@ -36,11 +49,90 @@ scale_height = 29 * 1.5
 # Animaciones de las palomas:
 FRAME_INTERVAL = FPS * 1.5 # Las palomas cambian de imagen cada 1.5 segundos
 
+# ========== INICIALIZAR MEDIAPIPE TASKS PARA DETECCIÓN DE MANOS ==========
+model_path = 'hand_landmarker.task'
+
+BaseOptions = mp.tasks.BaseOptions
+HandLandmarker = mp.tasks.vision.HandLandmarker
+HandLandmarkerOptions = mp.tasks.vision.HandLandmarkerOptions
+HandLandmarkerResult = mp.tasks.vision.HandLandmarkerResult
+VisionRunningMode = mp.tasks.vision.RunningMode
+
+# Variable global para almacenar el resultado de la detección
+detection_result = None
+hand_x = display_w // 2  # Posición inicial de la mano en el centro
+gun_rotation_angle = 0  # Ángulo de rotación del arma
+
+def get_result(result: HandLandmarkerResult, output_image: mp.Image, timestamp_ms: int):
+    """Callback para procesar los resultados de la detección de manos"""
+    global detection_result
+    detection_result = result
+
+
+def draw_landmarks_on_image(rgb_image, detection_result):
+    """Dibuja los landmarks de las manos en la imagen"""
+    hand_landmarks_list = detection_result.hand_landmarks
+    annotated_image = np.copy(rgb_image)
+
+    # Iterar sobre las manos detectadas
+    for idx in range(len(hand_landmarks_list)):
+        hand_landmarks = hand_landmarks_list[idx]
+        
+        # Dibujar los landmarks de la mano
+        hand_landmarks_proto = landmark_pb2.NormalizedLandmarkList()
+        hand_landmarks_proto.landmark.extend([
+            landmark_pb2.NormalizedLandmark(x=landmark.x, y=landmark.y, z=landmark.z) for landmark in hand_landmarks
+        ])
+        solutions.drawing_utils.draw_landmarks(
+            annotated_image,
+            hand_landmarks_proto,
+            solutions.hands.HAND_CONNECTIONS,
+            solutions.drawing_styles.get_default_hand_landmarks_style(),
+            solutions.drawing_styles.get_default_hand_connections_style())
+
+    return annotated_image
+
+
+def is_hand_open(hand_landmarks):
+    """Detecta si la mano está abierta calculando la distancia entre la muñeca y el dedo medio"""
+    # En MediaPipe Tasks, hand_landmarks es una lista de NormalizedLandmark
+    # Índice 0 = muñeca, Índice 12 = punta del dedo medio
+    wrist = hand_landmarks[0]
+    middle_finger_tip = hand_landmarks[12]
+    
+    # Calcular distancia vertical entre muñeca y punta del dedo medio
+    distance = middle_finger_tip.y - wrist.y
+    
+    # Si la distancia es negativa y el valor absoluto es mayor a 0.15, la mano está abierta
+    return distance < -0.15
+
+
+def get_hand_rotation(hand_landmarks):
+    """Calcula el ángulo de rotación de la mano basado en la orientación de los dedos"""
+    import math
+    # Usar la muñeca (0) y el dedo índice (6) para calcular la rotación
+    wrist = hand_landmarks[0]
+    index_finger_pip = hand_landmarks[6]  # Articulación PIP del índice
+    
+    # Calcular el vector desde la muñeca al dedo índice
+    dx = index_finger_pip.x - wrist.x
+    dy = index_finger_pip.y - wrist.y
+    
+    # Calcular el ángulo en radianes y convertir a grados
+    angle_rad = math.atan2(dy, dx)
+    angle_deg = math.degrees(angle_rad)
+    
+    # Ajustar el ángulo para Pygame
+    angle_pygame = -angle_deg - 90
+    
+    return angle_pygame
+
+
 # Fucniones para añadir los objetos al espacio de pymunk
 def add_lr_pidgeon(space): # Paloma que aparece por la izquierda y desaparece por la derecha
     mass = 3
     # radius = 20
-    width = scale_width
+    width = scale_width 
     height = scale_height
     body = pymunk.Body(body_type=pymunk.Body.KINEMATIC) # Creamos el cuerpo de la paloma cinemático
     x = random.choice([0, display_w])  # Seleccionamos el rango en x en que se va a crear (bordes de la pantalla)
@@ -77,23 +169,31 @@ def add_proyectile(space, position): # Proyectil de la paloma
 
 def add_hunter(space): # Cazador de palomas
     mass = 10
-    width = 20
-    height = 60
+    width = HUNTER_W
+    height = HUNTER_H
     body = pymunk.Body(body_type=pymunk.Body.KINEMATIC) # Creamos el cuerpo del cazador cinemático
     body.position = display_w // 2, 50 # Fijamos su posición en el centro abajo de la pantalla
     shape = pymunk.Poly.create_box(body, (width, height)) # Creamos una forma rectangular para que el cuerpo pueda colisionar
     shape.mass = mass
+    # Guardar dimensiones para dibujo (ancho y alto en píxeles del cuerpo)
+    shape.width = width
+    shape.height = height
+    shape.draw_radius = width // 2  # atributo auxiliar (semántico)
     space.add(body, shape)
     return shape
 
 def add_gun(space, hunter):
     mass = 2
-    width = 10
-    height = 30
+    width = GUN_W
+    height = GUN_H
     body = pymunk.Body(body_type=pymunk.Body.KINEMATIC) # Creamos el cuerpo del arma cinemático
     body.position = hunter.body.position.x, hunter.body.position.y + 40 # Fijamos su posición encima del cazador
     shape = pymunk.Poly.create_box(body, (width, height)) # Creamos una forma rectangular para que el cuerpo pueda colisionar
     shape.mass = mass
+    # Guardar dimensiones para dibujo
+    shape.width = width
+    shape.height = height
+    shape.draw_radius = width // 2
     space.add(body, shape)
     return shape
 
@@ -123,20 +223,51 @@ def draw_proyectile_with_image(screen,proyectile,image):
     screen.blit(image, p)
 
 def draw_hunter(screen, hunter):
-    p = int(hunter.body.position.x), display_h - int(hunter.body.position.y)
-    pygame.draw.rect(screen, (0,255,0), (p[0] - hunter.radius, p[1] - hunter.radius, hunter.radius * 2, hunter.radius * 4), 2)
+    # Dibujar rectángulo del cazador usando sus dimensiones guardadas
+    cx = int(hunter.body.position.x)
+    cy = display_h - int(hunter.body.position.y)
+    w = int(getattr(hunter, 'width', 20))
+    h = int(getattr(hunter, 'height', 60))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    pygame.draw.rect(screen, (0,255,0), rect, 2)
 
 def draw_hunter_with_image(screen,hunter,image):
-    p = int(hunter.body.position.x - hunter.radius), (display_h - int(hunter.body.position.y))- hunter.radius
-    screen.blit(image, p)
+    # Dibujar rectángulo del cazador y superponer la imagen centrada
+    cx = int(hunter.body.position.x)
+    cy = display_h - int(hunter.body.position.y)
+    w = int(getattr(hunter, 'width', 20))
+    h = int(getattr(hunter, 'height', 60))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    # Dibujar rectángulo (borde)
+    pygame.draw.rect(screen, (0,255,0), rect, 2)
+    # Superponer imagen centrada en el rectángulo
+    if image is not None:
+        ix, iy = image.get_width(), image.get_height()
+        img_pos = (cx - ix // 2, cy - iy // 2)
+        screen.blit(image, img_pos)
 
-def draw_gun(screen, gun):
-    p = int(gun.body.position.x), display_h - int(gun.body.position.y)
-    pygame.draw.rect(screen, (255,255,0), (p[0] - gun.radius, p[1] - gun.radius, gun.radius * 2, gun.radius * 3), 2)
+def draw_gun(screen, gun, angle=0):
+    # Dibujar rectángulo del arma usando sus dimensiones guardadas
+    cx = int(gun.body.position.x)
+    cy = display_h - int(gun.body.position.y)
+    w = int(getattr(gun, 'width', 10))
+    h = int(getattr(gun, 'height', 30))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    pygame.draw.rect(screen, (255,255,0), rect, 2)
 
-def draw_gun_with_image(screen,gun,image):
-    p = int(gun.body.position.x - gun.radius), (display_h - int(gun.body.position.y))- gun.radius
-    screen.blit(image, p)
+def draw_gun_with_image(screen, gun, image, angle=0):
+    # Dibujar rectángulo del arma y superponer la imagen centrada
+    cx = int(gun.body.position.x)
+    cy = display_h - int(gun.body.position.y)
+    w = int(getattr(gun, 'width', 10))
+    h = int(getattr(gun, 'height', 30))
+    rect = (cx - w // 2, cy - h // 2, w, h)
+    pygame.draw.rect(screen, (255,255,0), rect, 2)
+    if image is not None:
+        # Rotar la imagen según el ángulo de la mano
+        rotated_image = pygame.transform.rotate(image, angle)
+        rotated_rect = rotated_image.get_rect(center=(cx, cy))
+        screen.blit(rotated_image, rotated_rect)
 
 def update_pidgeon_animation(pidgeon):
     pidgeon.animation_timer -= 1
@@ -176,21 +307,22 @@ def main():
     # Agrupamos las imágenes que componen el movimiento de la paloma que surge de la derecha
     right_pidgeon_frame = [image_rl_pidgeon_open, image_rl_pidgeon_close]
 
-    image_proyectile= pygame.image.load("basketball.png")
-    image_proyectile = pygame.transform.scale(image_proyectile,(5*2,5*2 ))
-    
-    image_hunter= pygame.image.load("basketball.png")
-    image_hunter = pygame.transform.scale(image_hunter,(20*2,60*2 ))
-    
-    image_gun= pygame.image.load("basketball.png")
-    image_gun = pygame.transform.scale(image_gun,(10*2,30*2 ))
+    image_proyectile = pygame.image.load("basketball.png")
+    image_proyectile = pygame.transform.scale(image_proyectile, (5*2, 5*2))
+
+    # Escalar las imágenes del cazador y del arma al cargarlas usando los tamaños definidos
+    image_hunter = pygame.image.load("basketball.png")
+    image_hunter = pygame.transform.scale(image_hunter, (HUNTER_W, HUNTER_H))
+
+    image_gun = pygame.image.load("basketball.png")
+    image_gun = pygame.transform.scale(image_gun, (GUN_W, GUN_H))
     
     # Inicializamos PyGame
     pygame.init()
     # Definimos el tamaño (en píxeles) de la ventana de visualización en PyGame
     screen = pygame.display.set_mode((display_w, display_h))
     # Añadimos un título a la ventana
-    pygame.display.set_caption("El destino de la humanidad depende de ti. ¡Acaba con las palomas marroquíes!")
+    pygame.display.set_caption("El destino de la humanidad depende de ti. ¡Acaba con las palomas urbanas!")
     clock = pygame.time.Clock()
     # Inicializamos el espacio en pymunk
     space = pymunk.Space()
@@ -202,51 +334,120 @@ def main():
     
 
     pidgeons = []
-    #draw_options = pymunk.pygame_util.DrawOptions(screen)
 
+    # Crear el cazador y el arma
+    hunter_shape = add_hunter(space)
+    gun_shape = add_gun(space, hunter_shape)
 
     ticks_to_next_pidgeon = 10
-    while True:
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                sys.exit(0)
-            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
-                sys.exit(0)
- 
-        ticks_to_next_pidgeon -= 1   # Decrementamos el contador de ticks para la siguiente paloma
-        if ticks_to_next_pidgeon <= 0:  # Si ha llegado a cero, añadimos una nueva paloma
-            ticks_to_next_pidgeon = random.randint(TICKS_MIN, TICKS_MAX)  # Reiniciamos el contador de ticks para que tarde de 1 a 2 s en cargar una paloma
-            pidgeon_shape = add_lr_pidgeon(space)     # Añadimos la paloma al espacio
-            pidgeons.append(pidgeon_shape)     # Y la añadimos a la lista de palomas
+    
+    # Configurar MediaPipe Tasks
+    options = HandLandmarkerOptions(
+        base_options=BaseOptions(model_asset_path=model_path),
+        running_mode=VisionRunningMode.LIVE_STREAM,
+        result_callback=get_result)
+
+    cap = cv2.VideoCapture(0)
+    
+    # Variables locales para el loop
+    current_hand_x = hand_x
+    current_gun_rotation = 0
+    
+    with HandLandmarker.create_from_options(options) as landmarker:
+        running = True
+        frame_count = 0
         
-        # La función 'step' hace avanzar la simulación un paso (en seg.) en el tiempo cada vez que se la llama.
-        # Es mejor usar un paso constante y no ajustarlo en función de lo que tarde cada iteración del bucle. 
-        # Debe estar coordinado con lo FPS definidos en PyGame.
-        space.step(1/FPS)
+        while running and cap.isOpened():
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    running = False
+                elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                    running = False
+            
+            # Capturar frame de la cámara
+            success, image = cap.read()
+            if not success:
+                print("Ignoring empty camera frame.")
+                continue
+            
+            image = cv2.flip(image, 1)
+            h, w, c = image.shape
+            
+            # Convertir a formato de MediaPipe
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=cv2.cvtColor(image, cv2.COLOR_BGR2RGB))
+            
+            # Detectar manos
+            frame_timestamp_ms = int(time.time() * 1000)
+            landmarker.detect_async(mp_image, frame_timestamp_ms)
+            
+            # Procesar resultados de detección
+            if detection_result is not None:
+                image_annotated = draw_landmarks_on_image(mp_image.numpy_view(), detection_result)
+                
+                if len(detection_result.hand_landmarks) > 0:
+                    landmarks = detection_result.hand_landmarks[0]
+                    
+                    # Verificar si la mano está abierta
+                    if is_hand_open(landmarks):
+                        # Usar la muñeca para controlar el cazador
+                        wrist = landmarks[0]
+                        # Convertir coordenadas normalizadas a píxeles del juego
+                        current_hand_x = int(wrist.x * display_w)
+                        # Limitar dentro de los bordes
+                        current_hand_x = max(30, min(display_w - 30, current_hand_x))
+                        
+                        # Calcular el ángulo de rotación del arma basado en la orientación de la mano
+                        current_gun_rotation = get_hand_rotation(landmarks)
+            
+            # Actualizar posición del cazador y el arma
+            hunter_shape.body.position = current_hand_x, hunter_shape.body.position.y
+            gun_shape.body.position = current_hand_x, gun_shape.body.position.y
+            
+            ticks_to_next_pidgeon -= 1   # Decrementamos el contador de ticks para la siguiente paloma
+            if ticks_to_next_pidgeon <= 0:  # Si ha llegado a cero, añadimos una nueva paloma
+                ticks_to_next_pidgeon = random.randint(TICKS_MIN, TICKS_MAX)  # Reiniciamos el contador de ticks
+                pidgeon_shape = add_lr_pidgeon(space)     # Añadimos la paloma al espacio
+                pidgeons.append(pidgeon_shape)     # Y la añadimos a la lista de palomas
+            
+            # La función 'step' hace avanzar la simulación un paso (en seg.) en el tiempo cada vez que se la llama.
+            space.step(1/FPS)
 
-        # Rellenamos la ventana con un fondo blanco
-        screen.fill((255,255,255))
+            # Rellenamos la ventana con un fondo blanco
+            screen.fill((255,255,255))
 
-        pidgeons_to_remove = []  # Lista para almacenar las palomas que deben ser eliminadas
-         # Dibujamos las palomas
-        for pidgeon in pidgeons:
-            update_pidgeon_animation(pidgeon)
-            draw_pidgeon(screen,pidgeon)
-            draw_pidgeon_with_image(screen,pidgeon, left_pidgeon_frame, right_pidgeon_frame)
-            if pidgeon.body.position.x > 850 or pidgeon.body.position.x < -50:   # Si la paloma sale de la pantalla, la marcamos para eliminarla
-                pidgeons_to_remove.append(pidgeon)
-        # Eliminamos las palomas que han salido de la pantalla        
-        for pidgeon in pidgeons_to_remove:
-            space.remove(pidgeon, pidgeon.body)
-            pidgeons.remove(pidgeon)
+            pidgeons_to_remove = []  # Lista para almacenar las palomas que deben ser eliminadas
+             # Dibujamos las palomas
+            for pidgeon in pidgeons:
+                update_pidgeon_animation(pidgeon)
+                draw_pidgeon(screen,pidgeon)
+                draw_pidgeon_with_image(screen,pidgeon, left_pidgeon_frame, right_pidgeon_frame)
+                if pidgeon.body.position.x > 850 or pidgeon.body.position.x < -50:   # Si la paloma sale de la pantalla, la marcamos para eliminarla
+                    pidgeons_to_remove.append(pidgeon)
+            # Eliminamos las palomas que han salido de la pantalla        
+            for pidgeon in pidgeons_to_remove:
+                space.remove(pidgeon, pidgeon.body)
+                pidgeons.remove(pidgeon)
 
-        #space.debug_draw(draw_options)
+            # Dibujamos el cazador y el arma
+            draw_hunter(screen, hunter_shape)
+            draw_hunter_with_image(screen, hunter_shape, image_hunter)
+            draw_gun(screen, gun_shape, current_gun_rotation)
+            draw_gun_with_image(screen, gun_shape, image_gun, current_gun_rotation)
 
-        # Actualiza la ventana de visualización. Muestra todo lo que se dibujó en este frame.
-        pygame.display.flip()
+            # Actualiza la ventana de visualización
+            pygame.display.flip()
 
-        # Limita la velocidad del juego a 50 FPS
-        clock.tick(FPS)
+            # Mostrar frame de OpenCV con landmarks
+            cv2.imshow('Hand Detection', image_annotated if detection_result is not None else image)
+            if cv2.waitKey(5) & 0xFF == 27:
+                running = False
+
+            # Limita la velocidad del juego a 50 FPS
+            clock.tick(FPS)
+    
+    cap.release()
+    cv2.destroyAllWindows()
+    pygame.quit()
 
 if __name__ == '__main__':
     sys.exit(main())
