@@ -110,41 +110,38 @@ def is_hand_open(hand_landmarks):
 
 
 def get_hand_rotation(hand_landmarks):
-    """Calcula el ángulo de rotación de la mano basado en la orientación de los dedos"""
+    """Calcula el ángulo de rotación de la mano basado en la orientación de los dedos (en grados)"""
     import math
-    # Usar la muñeca (0) y el dedo índice (6) para calcular la rotación
+    # Usar la muñeca (0) y el dedo índice (8) para calcular la rotación
     wrist = hand_landmarks[0]
-    index_finger_pip = hand_landmarks[6]  # Articulación PIP del índice
+    index_finger_tip = hand_landmarks[8]  # Punta del índice
     
     # Calcular el vector desde la muñeca al dedo índice
-    dx = index_finger_pip.x - wrist.x
-    dy = index_finger_pip.y - wrist.y
+    dx = index_finger_tip.x - wrist.x
+    dy = index_finger_tip.y - wrist.y
     
-    # Calcular el ángulo en radianes y convertir a grados
-    angle_rad = math.atan2(dy, dx)
+    # En el sistema de cámaraMediaPipe: X a la derecha, Y hacia abajo
+    # atan2 en este sistema nos da: 0° a derecha, 90° abajo, -90° arriba, 180/-180° izquierda
+    # Para Pygame donde Y va hacia abajo: queremos que 0° sea arriba
+    # Entonces: angle_display = atan2(dx, -dy) convierte a: 0° arriba, 90° derecha, -90° izquierda, 180 abajo
+    angle_rad = math.atan2(dx, -dy)
     angle_deg = math.degrees(angle_rad)
     
-    # Ajustar el ángulo para Pygame (para visualización)
-    angle_pygame = -angle_deg - 90
-    
-    return angle_pygame
+    return angle_deg
 
 
-def get_hand_rotation_raw(hand_landmarks):
-    """Calcula el ángulo de rotación de la mano en radianes (sin ajustes) para cálculos de física"""
+def get_hand_rotation_rad(hand_landmarks):
+    """Calcula el ángulo de rotación de la mano en radianes para cálculos de física"""
     import math
-    # Usar la muñeca (0) y el dedo índice (6) para calcular la rotación
+    # Mismo cálculo que get_hand_rotation pero en radianes
     wrist = hand_landmarks[0]
-    index_finger_pip = hand_landmarks[6]  # Articulación PIP del índice
+    index_finger_tip = hand_landmarks[8]
     
-    # Calcular el vector desde la muñeca al dedo índice
-    dx = index_finger_pip.x - wrist.x
-    dy = index_finger_pip.y - wrist.y
+    dx = index_finger_tip.x - wrist.x
+    dy = index_finger_tip.y - wrist.y
     
-    # Calcular el ángulo en radianes
-    # En coordenadas de cámara (MediaPipe): X va a la derecha, Y va hacia abajo
-    # atan2(dy, dx) nos da: 0° a la derecha, 90° hacia abajo, -90° hacia arriba
-    angle_rad = math.atan2(-dy, dx)  # Negamos dy porque en pymunk Y va hacia arriba
+    # atan2(dx, -dy) da el ángulo donde 0 es arriba (positivo Y en pymunk)
+    angle_rad = math.atan2(dx, -dy)
     
     return angle_rad
 
@@ -210,14 +207,16 @@ def add_projectile_from_gun(space, gun_position, hand_landmarks):
     body.position = gun_position
     
     # Obtener el ángulo en radianes para cálculos de física
-    angle_rad = get_hand_rotation_raw(hand_landmarks)
+    # Este ángulo es donde 0 rad = arriba, π/2 = derecha, -π/2 = izquierda, π = abajo
+    angle_rad = get_hand_rotation_rad(hand_landmarks)
     
     # Calcular velocidad del proyectil
     projectile_speed = 400
     
     # Calcular componentes de velocidad
-    vx = projectile_speed * math.cos(angle_rad)
-    vy = projectile_speed * math.sin(angle_rad)
+    # Para atan2(dx, -dy): vx = sin(angle), vy = cos(angle)
+    vx = projectile_speed * math.sin(angle_rad)
+    vy = projectile_speed * math.cos(angle_rad)
     
     body.velocity = (vx, vy)
     
