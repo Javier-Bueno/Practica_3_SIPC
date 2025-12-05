@@ -348,7 +348,7 @@ def main():
         result_callback=get_result)
 
     cap = cv2.VideoCapture(0)
-    global hand_x, detection_result
+    global hand_x, detection_result, gun_rotation_angle
     
     with HandLandmarker.create_from_options(options) as landmarker:
         running = True
