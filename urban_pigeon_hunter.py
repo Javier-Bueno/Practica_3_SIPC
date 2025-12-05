@@ -128,6 +128,19 @@ def get_hand_rotation(hand_landmarks):
     return angle_pygame
 
 
+def is_pinch_gesture(hand_landmarks):
+    """Detecta si la mano está haciendo un gesto de pellizco (pulgar e índice juntos)"""
+    # Índice 4 = punta del pulgar, Índice 8 = punta del índice
+    thumb_tip = hand_landmarks[4]
+    index_tip = hand_landmarks[8]
+    
+    # Calcular distancia euclidiana entre pulgar e índice
+    distance = ((thumb_tip.x - index_tip.x) ** 2 + (thumb_tip.y - index_tip.y) ** 2) ** 0.5
+    
+    # Si la distancia es pequeña (< 0.05), el gesto es un pellizco
+    return distance < 0.05
+
+
 # Fucniones para añadir los objetos al espacio de pymunk
 def add_lr_pidgeon(space): # Paloma que aparece por la izquierda y desaparece por la derecha
     mass = 3
@@ -162,6 +175,25 @@ def add_proyectile(space, position): # Proyectil de la paloma
     radius = 5
     body = pymunk.Body(body_type=pymunk.Body.DYNAMIC) # Creamos el cuerpo del proyectil dinámico
     body.position = position # Fijamos su posición a la posición de la paloma
+    shape = pymunk.Circle(body, radius)
+    shape.mass = mass
+    space.add(body, shape)
+    return shape
+
+def add_projectile_from_gun(space, gun_position, gun_rotation):
+    """Crear un proyectil disparado desde el arma"""
+    import math
+    mass = 1
+    radius = 5
+    body = pymunk.Body(body_type=pymunk.Body.DYNAMIC)
+    body.position = gun_position
+    
+    # Calcular la velocidad basada en el ángulo del arma
+    # gun_rotation está en grados, convertir a radianes
+    angle_rad = math.radians(gun_rotation)
+    projectile_speed = 400
+    body.velocity = (projectile_speed * math.cos(angle_rad), projectile_speed * math.sin(angle_rad))
+    
     shape = pymunk.Circle(body, radius)
     shape.mass = mass
     space.add(body, shape)
@@ -331,15 +363,18 @@ def main():
     # 900 dará como resultado una simulación visualmente atractiva
     space.gravity = (0.0, -900.0) # Modificamos la gravedad 
 
-    
-
     pidgeons = []
+    projectiles = []  # Lista para almacenar los proyectiles del cazador
 
     # Crear el cazador y el arma
     hunter_shape = add_hunter(space)
     gun_shape = add_gun(space, hunter_shape)
 
     ticks_to_next_pidgeon = 10
+    
+    # Variables de control para disparos
+    last_pinch_frame = -100  # Frame del último pellizco detectado
+    pinch_cooldown = 10  # Frames de espera entre disparos
     
     # Configurar MediaPipe Tasks
     options = HandLandmarkerOptions(
@@ -356,8 +391,10 @@ def main():
     with HandLandmarker.create_from_options(options) as landmarker:
         running = True
         frame_count = 0
+        current_frame = 0  # Contador de frames
         
         while running and cap.isOpened():
+            current_frame += 1
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
                     running = False
@@ -398,6 +435,14 @@ def main():
                         
                         # Calcular el ángulo de rotación del arma basado en la orientación de la mano
                         current_gun_rotation = get_hand_rotation(landmarks)
+                    
+                    # Detectar gesto de pellizco (pulgar e índice juntos) para disparar
+                    if is_pinch_gesture(landmarks) and (current_frame - last_pinch_frame) > pinch_cooldown:
+                        # Disparar un proyectil desde la posición del arma
+                        gun_pos = (int(gun_shape.body.position.x), int(gun_shape.body.position.y))
+                        projectile = add_projectile_from_gun(space, gun_pos, current_gun_rotation)
+                        projectiles.append(projectile)
+                        last_pinch_frame = current_frame
             
             # Actualizar posición del cazador y el arma
             hunter_shape.body.position = current_hand_x, hunter_shape.body.position.y
@@ -427,6 +472,22 @@ def main():
             for pidgeon in pidgeons_to_remove:
                 space.remove(pidgeon, pidgeon.body)
                 pidgeons.remove(pidgeon)
+
+            # Dibujar y actualizar proyectiles del cazador
+            projectiles_to_remove = []
+            for projectile in projectiles:
+                # Dibujar proyectil como círculo
+                p = int(projectile.body.position.x), display_h - int(projectile.body.position.y)
+                pygame.draw.circle(screen, (0, 0, 0), p, int(projectile.radius), 2)
+                
+                # Remover proyectiles que salieron de la pantalla
+                if projectile.body.position.x > 850 or projectile.body.position.x < -50 or projectile.body.position.y > 850 or projectile.body.position.y < -50:
+                    projectiles_to_remove.append(projectile)
+            
+            # Eliminar proyectiles fuera de pantalla
+            for projectile in projectiles_to_remove:
+                space.remove(projectile, projectile.body)
+                projectiles.remove(projectile)
 
             # Dibujamos el cazador y el arma
             draw_hunter(screen, hunter_shape)
