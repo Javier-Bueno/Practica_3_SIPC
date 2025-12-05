@@ -361,6 +361,9 @@ def main():
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
             
+            # Inicializar gun_rotation_angle en cada iteración (mantiene el valor anterior si no se detecta mano)
+            gun_rotation_angle_local = gun_rotation_angle
+            
             # Capturar frame de la cámara
             success, image = cap.read()
             if not success:
@@ -394,7 +397,10 @@ def main():
                         hand_x = max(30, min(display_w - 30, hand_x))
                         
                         # Calcular el ángulo de rotación del arma basado en la orientación de la mano
-                        gun_rotation_angle = get_hand_rotation(landmarks)
+                        gun_rotation_angle_local = get_hand_rotation(landmarks)
+            
+            # Actualizar la variable global
+            gun_rotation_angle = gun_rotation_angle_local
             
             # Actualizar posición del cazador y el arma
             hunter_shape.body.position = hand_x, hunter_shape.body.position.y
