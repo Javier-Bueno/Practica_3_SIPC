@@ -348,7 +348,10 @@ def main():
         result_callback=get_result)
 
     cap = cv2.VideoCapture(0)
-    global hand_x, detection_result, gun_rotation_angle
+    
+    # Variables locales para el loop
+    current_hand_x = hand_x
+    current_gun_rotation = 0
     
     with HandLandmarker.create_from_options(options) as landmarker:
         running = True
@@ -360,9 +363,6 @@ def main():
                     running = False
                 elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
                     running = False
-            
-            # Inicializar gun_rotation_angle en cada iteración (mantiene el valor anterior si no se detecta mano)
-            gun_rotation_angle_local = gun_rotation_angle
             
             # Capturar frame de la cámara
             success, image = cap.read()
@@ -392,19 +392,16 @@ def main():
                         # Usar la muñeca para controlar el cazador
                         wrist = landmarks[0]
                         # Convertir coordenadas normalizadas a píxeles del juego
-                        hand_x = int(wrist.x * display_w)
+                        current_hand_x = int(wrist.x * display_w)
                         # Limitar dentro de los bordes
-                        hand_x = max(30, min(display_w - 30, hand_x))
+                        current_hand_x = max(30, min(display_w - 30, current_hand_x))
                         
                         # Calcular el ángulo de rotación del arma basado en la orientación de la mano
-                        gun_rotation_angle_local = get_hand_rotation(landmarks)
-            
-            # Actualizar la variable global
-            gun_rotation_angle = gun_rotation_angle_local
+                        current_gun_rotation = get_hand_rotation(landmarks)
             
             # Actualizar posición del cazador y el arma
-            hunter_shape.body.position = hand_x, hunter_shape.body.position.y
-            gun_shape.body.position = hand_x, gun_shape.body.position.y
+            hunter_shape.body.position = current_hand_x, hunter_shape.body.position.y
+            gun_shape.body.position = current_hand_x, gun_shape.body.position.y
             
             ticks_to_next_pidgeon -= 1   # Decrementamos el contador de ticks para la siguiente paloma
             if ticks_to_next_pidgeon <= 0:  # Si ha llegado a cero, añadimos una nueva paloma
@@ -434,8 +431,8 @@ def main():
             # Dibujamos el cazador y el arma
             draw_hunter(screen, hunter_shape)
             draw_hunter_with_image(screen, hunter_shape, image_hunter)
-            draw_gun(screen, gun_shape, gun_rotation_angle)
-            draw_gun_with_image(screen, gun_shape, image_gun, gun_rotation_angle)
+            draw_gun(screen, gun_shape, current_gun_rotation)
+            draw_gun_with_image(screen, gun_shape, image_gun, current_gun_rotation)
 
             # Actualiza la ventana de visualización
             pygame.display.flip()
