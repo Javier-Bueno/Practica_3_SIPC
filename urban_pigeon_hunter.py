@@ -75,6 +75,8 @@ GUN_H = 100
 # Variables colisiones
 COLLISION_TYPE_PIGEON = 1
 COLLISION_TYPE_BULLET = 2
+COLLISION_TYPE_HUNTER = 3
+COLLISION_TYPE_ENEMY_BULLET = 4
 
 
 SHAPES_TO_REMOVE = []    # Aquí el handler meterá lo que hay que borrar
@@ -304,6 +306,7 @@ def add_pigeon(space): # Paloma
   
    shape = pymunk.Poly.create_box(body, (width, height)) # Creamos una forma rectangular para que el cuerpo pueda colisionar
    shape.mass = mass # Asignamos la masa a la forma
+   shape.group = 1
    shape.width = width
    shape.height = height
    shape.direction = direction
@@ -323,22 +326,37 @@ def add_pigeon(space): # Paloma
 
 
 
-def add_proyectile(space, position):
-   """Crea un proyectil (ej. disparo de una paloma) en posición dada.
-   - `position`: tupla (x, y) en coordenadas Pymunk
-   - Devuelve la `shape` del círculo creado.
+def add_proyectile(space, position, target_pos):
+   """
+   Crea un proyectil que cae TOTALMENTE RECTO desde la posición de la paloma.
+   Ignora la posición del cazador.
    """
    mass = 1
    radius = 5
+  
+   # Velocidad inicial hacia abajo (opcional, la gravedad ya lo acelera)
+   # Si quieres que caigan más rápido de golpe, aumenta este número.
+   initial_downward_speed = 200
 
 
-   # Cuerpo dinámico para que la física lo afecte (gravedad, colisiones)
    body = pymunk.Body(body_type=pymunk.Body.DYNAMIC)
    body.position = position
 
 
+   # --- LÓGICA DE BOMBA VERTICAL ---
+   # vx = 0 (No se mueve lateralmente)
+   # vy = negativo (Empujón hacia abajo)
+   # Como es DYNAMIC, la gravedad (-900) lo acelerará hacia el suelo inmediatamente.
+   body.velocity = 0, -initial_downward_speed
+
+
    shape = pymunk.Circle(body, radius)
    shape.mass = mass
+   shape.group = 1
+   shape.color = (0, 0, 0)
+   shape.collision_type = COLLISION_TYPE_ENEMY_BULLET
+
+
    space.add(body, shape)
    return shape
 
@@ -363,6 +381,11 @@ def add_hunter(space):
 
    shape = pymunk.Poly.create_box(body, (width, height))
    shape.mass = mass
+
+
+   shape.collision_type = COLLISION_TYPE_HUNTER
+
+
    # Atributos auxiliares para dibujado
    shape.width = width
    shape.height = height
@@ -389,6 +412,7 @@ def add_gun(space, hunter):
   
    shape = pymunk.Poly.create_box(body, (width, height))
    shape.mass = mass
+   shape.group = 1
    shape.width = width
    shape.height = height
    shape.draw_radius = width // 2
@@ -503,15 +527,8 @@ def draw_hunter(screen, hunter):
 
 
 def draw_hunter_with_image(screen, hunter, image):
-   """Dibuja el rectángulo del cazador y superpone la imagen centrada si existe."""
-   cx = int(hunter.body.position.x)
-   cy = display_h - int(hunter.body.position.y)
-   w = int(getattr(hunter, 'width', 20))
-   h = int(getattr(hunter, 'height', 60)).Body(body_type=pymunk.
-   if image is not None:
-       ix, iy = image.get_width(), image.get_height()
-       img_pos = (cx - ix // 2, cy - iy // 2)
-       screen.blit(image, img_pos)
+   p = int(hunter.body.position.x - hunter.width / 2), (display_h - int(hunter.body.position.y + (hunter.height / 2)))
+   screen.blit(image, p)
 
 
 
@@ -538,7 +555,7 @@ def draw_gun_with_image(screen, gun, image, angle=0):
    w = int(getattr(gun, 'width', 10))
    h = int(getattr(gun, 'height', 30))
    rect = (cx - w // 2, cy - h // 2, w, h)
-   pygame.draw.rect(screen, (255,255,0), rect, 2)
+   #pygame.draw.rect(screen, (255,255,0), rect, 2)
    if image is not None:
        # Rotar la imagen y obtener un rect centrado en (cx, cy)
        rotated_image = pygame.transform.rotate(image, angle)
@@ -611,15 +628,23 @@ def bullet_hits_pigeon(arbiter, space, data):
    return False
 
 
+def hunter_hit(arbiter, space, data):
+   print("¡TE HAN DADO! PERDISTE UNA VIDA 💀")
+   sys.exit(0)
+   # Aquí podrías restar vidas o poner running = False para Game Over
+   return False
 
 
 def setup_collision_handler(space):
    """
-   Configura el manejador de colisiones (Sintaxis antigua ULL).
+   Configura el manejador de colisiones
    """
    # Usamos 'on_collision' que es la función disponible en tu versión de laboratorio.
    # Usamos el parámetro 'begin' para detectar el momento exacto del impacto.
    space.on_collision(COLLISION_TYPE_PIGEON, COLLISION_TYPE_BULLET, begin=bullet_hits_pigeon)
+   space.on_collision(COLLISION_TYPE_HUNTER, COLLISION_TYPE_ENEMY_BULLET, begin=hunter_hit)
+
+
 
 
 
@@ -756,6 +781,9 @@ def main():
        SHOT_COOLDOWN_MAX = FPS / 5 # Cantidad de ticks entre disparos (aprox 0.3 segundos a 50 FPS)
 
 
+       enemy_bullets = []    # Lista para los proyectiles de las palomas
+       # -------------------
+       pigeon_shot_cooldown = 0
        # ------------------ Bucle principal del juego ------------------
        while running and cap.isOpened():
            # Gestionar eventos de PyGame (ventana, teclado)
@@ -888,6 +916,14 @@ def main():
                update_pigeon_animation(pigeon)
                draw_pigeon(screen, pigeon)
                draw_pigeon_with_image(screen, pigeon, left_pigeon_frame, right_pigeon_frame)
+              
+               # 1.5% de probabilidad de disparo en cada frame.
+               # Si ves que son muchas balas, baja el 0.015 a 0.005.
+               if random.random() < 0.015:
+                   # Crea la bala desde la posición de la paloma hacia la del cazador
+                   eb = add_proyectile(space, pigeon.body.position, hunter_shape.body.position)
+                   enemy_bullets.append(eb)
+              
                # Si la paloma sale de la pantalla la marcamos para eliminarla
                if pigeon.body.position.x > 850 or pigeon.body.position.x < -50:
                    pigeons_to_remove.append(pigeon)
@@ -909,6 +945,23 @@ def main():
                space.remove(b.body, b) # Importante: quitar del espacio se
                bullets.remove(b)       # Quitar de la lista lógica
       
+          
+           enemy_bullets_to_remove = []
+           for eb in enemy_bullets:
+               # Dibujamos la bala. Puedes usar draw_bullet o crear draw_enemy_bullet
+               # Aquí la pinto negra directamente para diferenciar
+               p = int(eb.body.position.x), display_h - int(eb.body.position.y)
+               pygame.draw.circle(screen, (0, 0, 0), p, int(eb.radius))
+              
+               # Borrar si sale de la pantalla
+               bx, by = eb.body.position
+               if bx < 0 or bx > display_w or by < 0 or by > display_h:
+                   enemy_bullets_to_remove.append(eb)
+
+
+           for eb in enemy_bullets_to_remove:
+               space.remove(eb.body, eb)
+               enemy_bullets.remove(eb)
 
 
            # Eliminamos palomas fuera de la pantalla del espacio y la lista
@@ -922,7 +975,7 @@ def main():
 
 
            # Dibujar jugador y arma (con la rotación calculada)
-           draw_gun(screen, gun_shape, current_gun_rotation)
+           #draw_gun(screen, gun_shape, current_gun_rotation)
            draw_gun_with_image(screen, gun_shape, image_gun, current_gun_rotation)
            draw_hunter(screen, hunter_shape)
            draw_hunter_with_image(screen, hunter_shape, image_hunter)
@@ -958,3 +1011,4 @@ def main():
 if __name__ == '__main__':
    # `sys.exit(main())` permite devolver el código de salida si fuese necesario
    sys.exit(main())
+
