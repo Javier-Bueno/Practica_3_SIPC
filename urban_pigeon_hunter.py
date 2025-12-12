@@ -84,6 +84,10 @@ SHAPES_TO_REMOVE = []    # Aquí el handler meterá lo que hay que borrar
 EXPLOSIONS = []          # Aquí guardaremos dónde dibujar explosiones
 EXPLOSION_DURATION = 10  # Cuántos frames dura la explosión
 
+# Mensajes HUD para mostrar texto temporal en pantalla (ej. cuando te golpean)
+HUD_MESSAGES = []
+MESSAGE_DURATION = FPS * 2  # duración por defecto en ticks (~2 segundos)
+
 
 # =================================================
 #     Apartado de la configuración de la mano
@@ -634,10 +638,15 @@ def bullet_hits_pigeon(arbiter, space, data):
 
 
 def hunter_hit(arbiter, space, data):
-   print("¡TE HAN DADO! PERDISTE UNA VIDA 💀")
-   sys.exit(0)
-   # Aquí podrías restar vidas o poner running = False para Game Over
-   return False
+    # Encolar un mensaje para mostrar en pantalla durante unos segundos
+    global HUD_MESSAGES
+    HUD_MESSAGES.append({'text': '¡TE HAN DADO! TEN MAS CUIDADO 💀', 'timer': MESSAGE_DURATION})
+    # También imprimimos por consola para depuración
+    print("¡TE HAN DADO! PERDISTE UNA VIDA 💀")
+
+    proyectile_shape = arbiter.shapes[1] 
+    SHAPES_TO_REMOVE.append(proyectile_shape)
+    return False
 
 def gun_hit(arbiter, space, data):
     """Handler cuando un proyectil enemigo colisiona con el arma.
@@ -742,6 +751,8 @@ def main():
    screen = pygame.display.set_mode((display_w, display_h))
    pygame.display.set_caption("El destino de la humanidad depende de ti. ¡Acaba con las palomas urbanas!")
    clock = pygame.time.Clock()
+   # Fuente para mensajes HUD
+   font = pygame.font.SysFont(None, 48)
 
 
    # Creamos el espacio físico donde se simulará la física
@@ -903,6 +914,8 @@ def main():
                    pigeons.remove(shape)
                if shape in bullets:
                    bullets.remove(shape)
+               if shape in enemy_bullets:
+                   enemy_bullets.remove(shape)
                space.remove(shape, shape.body)
           
            SHAPES_TO_REMOVE.clear()
@@ -998,6 +1011,19 @@ def main():
            draw_gun_with_image(screen, gun_shape, image_gun, current_gun_rotation)
            draw_hunter(screen, hunter_shape)
            draw_hunter_with_image(screen, hunter_shape, image_hunter)
+
+           # Dibujar mensajes HUD (texto temporal)
+           hud_to_remove = []
+           for msg in HUD_MESSAGES:
+               # Renderizar el texto y dibujarlo centrado en la parte superior
+               text_surf = font.render(msg['text'], True, (255, 0, 0))
+               text_rect = text_surf.get_rect(center=(display_w // 2, 40))
+               screen.blit(text_surf, text_rect)
+               msg['timer'] -= 1
+               if msg['timer'] <= 0:
+                   hud_to_remove.append(msg)
+           for m in hud_to_remove:
+               HUD_MESSAGES.remove(m)
 
 
           
