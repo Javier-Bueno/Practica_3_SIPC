@@ -731,6 +731,9 @@ def main():
    image_back = pygame.image.load("Imagenes/Ciudad/Ciudad.png")
    image_back = pygame.transform.scale(image_back, (display_w, display_h))
    
+   # Imagen para el arma (placeholder)
+   image_gun = pygame.image.load("Imagenes/Rifle/Rifle.png")
+   image_gun = pygame.transform.scale(image_gun, (GUN_W, GUN_H))
 
 
 
