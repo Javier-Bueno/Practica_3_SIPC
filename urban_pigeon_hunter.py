@@ -907,7 +907,7 @@ def main():
 
            # Avanzar la simulación física un paso (delta = 1/FPS segundos)
            space.step(1 / FPS)
-
+ 
 
            for shape in SHAPES_TO_REMOVE:
                if shape in pigeons:
