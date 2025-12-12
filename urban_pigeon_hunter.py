@@ -77,6 +77,7 @@ COLLISION_TYPE_PIGEON = 1
 COLLISION_TYPE_BULLET = 2
 COLLISION_TYPE_HUNTER = 3
 COLLISION_TYPE_ENEMY_BULLET = 4
+COLLISION_TYPE_GUN = 5
 
 
 SHAPES_TO_REMOVE = []    # Aquí el handler meterá lo que hay que borrar
@@ -397,29 +398,33 @@ def add_hunter(space):
 
 
 def add_gun(space, hunter):
-   """Crea el cuerpo del arma asociado al cazador.
-   La posición inicial del arma se fija en relación al cuerpo `hunter`.
-   El arma también es cinemática y se moverá junto al cazador en X.
-   """
-   mass = 2
-   width = GUN_W
-   height = GUN_H
+    """Crea el cuerpo del arma asociado al cazador.
+    La posición inicial del arma se fija en relación al cuerpo `hunter`.
+    El arma también es cinemática y se moverá junto al cazador en X.
+    """
+    mass = 2
+    width = GUN_W
+    height = GUN_H
 
+    body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+    # Posicionamos el arma por encima del cazador (offset +40 en Y)
+    body.position = hunter.body.position.x, hunter.body.position.y + 40
 
-   body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-   # Posicionamos el arma por encima del cazador (offset +40 en Y)
-   body.position = hunter.body.position.x, hunter.body.position.y + 40
-  
-   shape = pymunk.Poly.create_box(body, (width, height))
-   shape.mass = mass
-   shape.group = 1
-   shape.width = width
-   shape.height = height
-   shape.draw_radius = width // 2
-   space.add(body, shape)
+    shape = pymunk.Poly.create_box(body, (width, height))
+    shape.mass = mass
+    shape.group = 1
+    shape.width = width
+    shape.height = height
+    shape.draw_radius = width // 2
+    # Marcar el arma con su tipo de colisión específico para poder
+    # manejar colisiones de proyectiles de paloma de forma separada.
+    shape.collision_type = COLLISION_TYPE_GUN
+    # Hacemos que el arma sea un sensor para que los proyectiles puedan
+    # atravesarla sin respuesta física.
+    shape.sensor = True
+    space.add(body, shape)
 
-
-   return shape
+    return shape
 
 
 def add_bullet(space, position, angle_degrees):
@@ -572,7 +577,7 @@ def draw_bullet(screen, bullet):
   
    # Dibujamos un círculo relleno
    # Color (50, 50, 50) es un gris muy oscuro, casi negro
-   pygame.draw.circle(screen, (50, 50, 50), p, int(bullet.radius))
+   pygame.draw.circle(screen, (255, 255, 255), p, int(bullet.radius))
 
 
 
@@ -634,15 +639,25 @@ def hunter_hit(arbiter, space, data):
    # Aquí podrías restar vidas o poner running = False para Game Over
    return False
 
+def gun_hit(arbiter, space, data):
+    """Handler cuando un proyectil enemigo colisiona con el arma.
+
+    Queremos que la 'caca' atraviese el arma sin producir respuesta física,
+    por lo que devolvemos False para que Pymunk ignore el procesamiento
+    físico de la colisión.
+    """
+    return False
 
 def setup_collision_handler(space):
-   """
-   Configura el manejador de colisiones
-   """
-   # Usamos 'on_collision' que es la función disponible en tu versión de laboratorio.
-   # Usamos el parámetro 'begin' para detectar el momento exacto del impacto.
-   space.on_collision(COLLISION_TYPE_PIGEON, COLLISION_TYPE_BULLET, begin=bullet_hits_pigeon)
-   space.on_collision(COLLISION_TYPE_HUNTER, COLLISION_TYPE_ENEMY_BULLET, begin=hunter_hit)
+    """
+    Configura el manejador de colisiones
+    """
+    # Usamos 'on_collision' que es la función disponible en tu versión de laboratorio.
+    # Usamos el parámetro 'begin' para detectar el momento exacto del impacto.
+    space.on_collision(COLLISION_TYPE_PIGEON, COLLISION_TYPE_BULLET, begin=bullet_hits_pigeon)
+    space.on_collision(COLLISION_TYPE_HUNTER, COLLISION_TYPE_ENEMY_BULLET, begin=hunter_hit)
+    # Colisión entre el arma y los proyectiles enemigos: que los proyectiles la atraviesen
+    space.on_collision(COLLISION_TYPE_GUN, COLLISION_TYPE_ENEMY_BULLET, begin=gun_hit)
 
 
 
@@ -712,11 +727,11 @@ def main():
    image_hunter = pygame.image.load("Imagenes/Cazador/Cazador.png")
    image_hunter = pygame.transform.scale(image_hunter, (HUNTER_W, HUNTER_H))
 
+   # Imagen para el fondo
+   image_back = pygame.image.load("Imagenes/Ciudad/Ciudad.png")
+   image_back = pygame.transform.scale(image_back, (display_w, display_h))
+   
 
-   # Imagen para el arma (placeholder)
-   image_gun = pygame.image.load("Imagenes/Rifle/Rifle.png")
-   image_gun = pygame.transform.scale(image_gun, (GUN_W, GUN_H))
-  
 
 
    # ------------------ Inicialización de PyGame y Pymunk ------------------
@@ -908,6 +923,7 @@ def main():
 
            # Dibujado: limpiar la pantalla y dibujar todos los elementos
            screen.fill((255,255,255))
+           screen.blit(image_back, (0,0))
 
 
            # Dibujar y actualizar animación de palomas
