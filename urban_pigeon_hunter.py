@@ -16,6 +16,8 @@
 # - Modificaciones: Creación del cazador y movimiento y rotación de la mano.
 # Versión 0.3.1
 # - Documentación y estructuración correcta del código
+# Version 0.4.0
+# - Modificaciones: Adición de game over y efectos de sonido
 
 
 # Importaciones:
@@ -73,15 +75,33 @@ GUN_H = 100
 
 
 # Variables colisiones
+GAME_OVER = False # Variable para detectar el fin de la partida.
+game_over_timer = 150 # Variable para contar la cuenta atras desde que te da una paloma y cerrar el juego (6-7 segundos)
 COLLISION_TYPE_PIGEON = 1
 COLLISION_TYPE_BULLET = 2
 COLLISION_TYPE_HUNTER = 3
 COLLISION_TYPE_ENEMY_BULLET = 4
+COLLISION_TYPE_GUN = 5
 
 
 SHAPES_TO_REMOVE = []    # Aquí el handler meterá lo que hay que borrar
 EXPLOSIONS = []          # Aquí guardaremos dónde dibujar explosiones
 EXPLOSION_DURATION = 10  # Cuántos frames dura la explosión
+
+# Mensajes HUD para mostrar texto temporal en pantalla (ej. cuando te golpean)
+HUD_MESSAGES = []
+MESSAGE_DURATION = FPS * 2  # duración por defecto en ticks (~2 segundos)
+
+
+# Efectos de sonidos que necesitan ser variables globales para ser usadas en colisiones:
+pygame.mixer.init() # Mezclador de audio
+
+# Efectos de sonido
+sonido_colision_bala_paloma = pygame.mixer.Sound("Efectos_sonido/sonido_explosion.mp3")
+sonido_colision_bala_paloma.set_volume(0.2)
+
+sonido_game_over = pygame.mixer.Sound("Efectos_sonido/sonido_game_over.mp3")
+sonido_game_over.set_volume(0.2)
 
 
 # =================================================
@@ -397,32 +417,36 @@ def add_hunter(space):
 
 
 def add_gun(space, hunter):
-   """Crea el cuerpo del arma asociado al cazador.
-   La posición inicial del arma se fija en relación al cuerpo `hunter`.
-   El arma también es cinemática y se moverá junto al cazador en X.
-   """
-   mass = 2
-   width = GUN_W
-   height = GUN_H
+    """Crea el cuerpo del arma asociado al cazador.
+    La posición inicial del arma se fija en relación al cuerpo `hunter`.
+    El arma también es cinemática y se moverá junto al cazador en X.
+    """
+    mass = 2
+    width = GUN_W
+    height = GUN_H
+
+    body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
+    # Posicionamos el arma por encima del cazador (offset +40 en Y)
+    body.position = hunter.body.position.x, hunter.body.position.y + 40
+
+    shape = pymunk.Poly.create_box(body, (width, height))
+    shape.mass = mass
+    shape.group = 1
+    shape.width = width
+    shape.height = height
+    shape.draw_radius = width // 2
+    # Marcar el arma con su tipo de colisión específico para poder
+    # manejar colisiones de proyectiles de paloma de forma separada.
+    shape.collision_type = COLLISION_TYPE_GUN
+    # Hacemos que el arma sea un sensor para que los proyectiles puedan
+    # atravesarla sin respuesta física.
+    shape.sensor = True
+    space.add(body, shape)
+
+    return shape
 
 
-   body = pymunk.Body(body_type=pymunk.Body.KINEMATIC)
-   # Posicionamos el arma por encima del cazador (offset +40 en Y)
-   body.position = hunter.body.position.x, hunter.body.position.y + 40
-  
-   shape = pymunk.Poly.create_box(body, (width, height))
-   shape.mass = mass
-   shape.group = 1
-   shape.width = width
-   shape.height = height
-   shape.draw_radius = width // 2
-   space.add(body, shape)
-
-
-   return shape
-
-
-def add_bullet(space, position, angle_degrees):
+def add_bullet(space, position, angle_degrees, efecto_sonido):
    """
    Crea una bala dinámica en la posición dada y con la velocidad angular correcta.
    """
@@ -464,6 +488,7 @@ def add_bullet(space, position, angle_degrees):
 
 
    space.add(body, shape)
+   efecto_sonido.play() # Efecto de sonido de disparo
    return shape
 
 
@@ -572,7 +597,7 @@ def draw_bullet(screen, bullet):
   
    # Dibujamos un círculo relleno
    # Color (50, 50, 50) es un gris muy oscuro, casi negro
-   pygame.draw.circle(screen, (50, 50, 50), p, int(bullet.radius))
+   pygame.draw.circle(screen, (255, 255, 255), p, int(bullet.radius))
 
 
 
@@ -625,24 +650,47 @@ def bullet_hits_pigeon(arbiter, space, data):
   
    # Devolver False para indicar a Pymunk que detenga el procesamiento físico de esta colisión
    # (ya que vamos a eliminar los objetos).
+   sonido_colision_bala_paloma.play() # Efecto de sonido de la explosión
+
    return False
 
 
 def hunter_hit(arbiter, space, data):
-   print("¡TE HAN DADO! PERDISTE UNA VIDA 💀")
-   sys.exit(0)
-   # Aquí podrías restar vidas o poner running = False para Game Over
-   return False
+    # Encolar un mensaje para mostrar en pantalla durante unos segundos
+    global GAME_OVER
+    if not GAME_OVER:
+       global HUD_MESSAGES
+       HUD_MESSAGES.append({'text': '¡TE HAN DADO! TEN MAS CUIDADO 💀', 'timer': MESSAGE_DURATION})
+       # También imprimimos por consola para depuración
+       print("¡TE HAN DADO! PERDISTE UNA VIDA 💀")
+       pygame.mixer.music.stop() # Detenemos la música de fondo
+       sonido_game_over.play() # Efecto de sonido de game over
+       GAME_OVER = True
 
+    proyectile_shape = arbiter.shapes[1] 
+    SHAPES_TO_REMOVE.append(proyectile_shape)
+       
+    return False
+
+def gun_hit(arbiter, space, data):
+    """Handler cuando un proyectil enemigo colisiona con el arma.
+
+    Queremos que la 'caca' atraviese el arma sin producir respuesta física,
+    por lo que devolvemos False para que Pymunk ignore el procesamiento
+    físico de la colisión.
+    """
+    return False
 
 def setup_collision_handler(space):
-   """
-   Configura el manejador de colisiones
-   """
-   # Usamos 'on_collision' que es la función disponible en tu versión de laboratorio.
-   # Usamos el parámetro 'begin' para detectar el momento exacto del impacto.
-   space.on_collision(COLLISION_TYPE_PIGEON, COLLISION_TYPE_BULLET, begin=bullet_hits_pigeon)
-   space.on_collision(COLLISION_TYPE_HUNTER, COLLISION_TYPE_ENEMY_BULLET, begin=hunter_hit)
+    """
+    Configura el manejador de colisiones
+    """
+    # Usamos 'on_collision' que es la función disponible en tu versión de laboratorio.
+    # Usamos el parámetro 'begin' para detectar el momento exacto del impacto.
+    space.on_collision(COLLISION_TYPE_PIGEON, COLLISION_TYPE_BULLET, begin=bullet_hits_pigeon)
+    space.on_collision(COLLISION_TYPE_HUNTER, COLLISION_TYPE_ENEMY_BULLET, begin=hunter_hit)
+    # Colisión entre el arma y los proyectiles enemigos: que los proyectiles la atraviesen
+    space.on_collision(COLLISION_TYPE_GUN, COLLISION_TYPE_ENEMY_BULLET, begin=gun_hit)
 
 
 
@@ -712,18 +760,37 @@ def main():
    image_hunter = pygame.image.load("Imagenes/Cazador/Cazador.png")
    image_hunter = pygame.transform.scale(image_hunter, (HUNTER_W, HUNTER_H))
 
-
+   # Imagen para el fondo
+   image_back = pygame.image.load("Imagenes/Ciudad/Ciudad.png")
+   image_back = pygame.transform.scale(image_back, (display_w, display_h))
+   
    # Imagen para el arma (placeholder)
    image_gun = pygame.image.load("Imagenes/Rifle/Rifle.png")
    image_gun = pygame.transform.scale(image_gun, (GUN_W, GUN_H))
-  
 
+   
+   # Variables para cargar los efectos de sonido:
 
+   # Efectos de sonido
+   sonido_aparicion_paloma = pygame.mixer.Sound("Efectos_sonido/sonido_paloma.mp3")
+   sonido_disparo = pygame.mixer.Sound("Efectos_sonido/sonido_revolver.mp3")
+   sonido_fondo = pygame.mixer.music.load("Efectos_sonido/sonido_fondo.mp3")
+   
+
+   # Ajustar volúmenes (0.0 a 1.0)
+   sonido_aparicion_paloma.set_volume(0.3)
+   sonido_disparo.set_volume(0.2)
+   pygame.mixer.music.set_volume(0.05)
+   
+
+   pygame.mixer.music.play(-1) # Música en bucle
    # ------------------ Inicialización de PyGame y Pymunk ------------------
    pygame.init()
    screen = pygame.display.set_mode((display_w, display_h))
    pygame.display.set_caption("El destino de la humanidad depende de ti. ¡Acaba con las palomas urbanas!")
    clock = pygame.time.Clock()
+   # Fuente para mensajes HUD
+   font = pygame.font.SysFont(None, 48)
 
 
    # Creamos el espacio físico donde se simulará la física
@@ -786,7 +853,13 @@ def main():
        pigeon_shot_cooldown = 0
        # ------------------ Bucle principal del juego ------------------
        while running and cap.isOpened():
-           # Gestionar eventos de PyGame (ventana, teclado)
+            # Gestionar eventos de PyGame (ventana, teclado)
+           if GAME_OVER:
+              global game_over_timer
+              game_over_timer -= 1
+              if game_over_timer <= 0:
+                 running = False
+            
            for event in pygame.event.get():
                if event.type == pygame.QUIT:
                    running = False
@@ -855,7 +928,7 @@ def main():
                        spawn_pos = (gun_shape.body.position.x, gun_shape.body.position.y + 50)
                       
                        # 2. Crear la bala
-                       new_bullet = add_bullet(space, spawn_pos, current_gun_rotation)
+                       new_bullet = add_bullet(space, spawn_pos, current_gun_rotation, sonido_disparo)
                        bullets.append(new_bullet)
                       
                        # 3. Reiniciar el cooldown
@@ -873,18 +946,21 @@ def main():
            if ticks_to_next_pigeon <= 0:
                ticks_to_next_pigeon = random.randint(TICKS_MIN, TICKS_MAX)
                pigeon_shape = add_pigeon(space)
+               sonido_aparicion_paloma.play() # Reproducir el efecto de sonido
                pigeons.append(pigeon_shape)
 
 
            # Avanzar la simulación física un paso (delta = 1/FPS segundos)
            space.step(1 / FPS)
-
+ 
 
            for shape in SHAPES_TO_REMOVE:
                if shape in pigeons:
                    pigeons.remove(shape)
                if shape in bullets:
                    bullets.remove(shape)
+               if shape in enemy_bullets:
+                   enemy_bullets.remove(shape)
                space.remove(shape, shape.body)
           
            SHAPES_TO_REMOVE.clear()
@@ -908,6 +984,7 @@ def main():
 
            # Dibujado: limpiar la pantalla y dibujar todos los elementos
            screen.fill((255,255,255))
+           screen.blit(image_back, (0,0))
 
 
            # Dibujar y actualizar animación de palomas
@@ -916,7 +993,6 @@ def main():
                update_pigeon_animation(pigeon)
                draw_pigeon(screen, pigeon)
                draw_pigeon_with_image(screen, pigeon, left_pigeon_frame, right_pigeon_frame)
-              
                # 1.5% de probabilidad de disparo en cada frame.
                # Si ves que son muchas balas, baja el 0.015 a 0.005.
                if random.random() < 0.015:
@@ -979,6 +1055,19 @@ def main():
            draw_gun_with_image(screen, gun_shape, image_gun, current_gun_rotation)
            draw_hunter(screen, hunter_shape)
            draw_hunter_with_image(screen, hunter_shape, image_hunter)
+
+           # Dibujar mensajes HUD (texto temporal)
+           hud_to_remove = []
+           for msg in HUD_MESSAGES:
+               # Renderizar el texto y dibujarlo centrado en la parte superior
+               text_surf = font.render(msg['text'], True, (255, 0, 0))
+               text_rect = text_surf.get_rect(center=(display_w // 2, 40))
+               screen.blit(text_surf, text_rect)
+               msg['timer'] -= 1
+               if msg['timer'] <= 0:
+                   hud_to_remove.append(msg)
+           for m in hud_to_remove:
+               HUD_MESSAGES.remove(m)
 
 
           
