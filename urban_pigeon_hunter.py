@@ -750,12 +750,6 @@ def main():
    # Agrupamos las imágenes que componen el movimiento de la paloma que surge de la derecha
    right_pigeon_frame = [image_rl_pigeon_open, image_rl_pigeon_close]
 
-
-   # Imagen y escala para proyectil (ejemplo: basketball.png)
-   image_proyectile = pygame.image.load("basketball.png")
-   image_proyectile = pygame.transform.scale(image_proyectile, (5*2, 5*2))
-
-
    # Imagen para el cazador (se utiliza el mismo asset como placeholder)
    image_hunter = pygame.image.load("Imagenes/Cazador/Cazador.png")
    image_hunter = pygame.transform.scale(image_hunter, (HUNTER_W, HUNTER_H))
