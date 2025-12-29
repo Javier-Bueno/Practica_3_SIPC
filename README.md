@@ -2,7 +2,7 @@
 
 ### Desarrollado por:
 Javier Bueno Calzadilla - alu0101627922@ull.edu.es  
-Adriel Reyes Suárez  
+Adriel Reyes Suárez - alu0101640136@ull.edu.es
 Carlos Pérez Gómez  
 
 ## Método de uso:
