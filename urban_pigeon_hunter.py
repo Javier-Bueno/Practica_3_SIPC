@@ -3,7 +3,7 @@
 # Sistemas de Interacción Persona-Computador
 # Práctica 3: Interfaces gestuales
 # Componentes del grupo:
-# - Javier Bueno Calzadilla - alu0101627922
+# - Javier Bueno Calzadilla
 # - Adriel Reyes Suárez
 # - Carlos Pérez Gómez
 # Versión: 1.0.0
@@ -494,9 +494,9 @@ def add_bullet(space, position, angle_degrees, efecto_sonido):
 
 
 
-# ================================================================
-# Funciones para dibujar los objetos en pantalla (HAY QUE REVISARLAS)
-# ================================================================
+# ================================================
+# Funciones para dibujar los objetos en pantalla
+# ================================================
 
 
 # Dibuja la paloma como un rectángulo rojo
@@ -892,10 +892,7 @@ def main():
                # Si se detectó al menos una mano, tomamos la primera
                if len(detection_result.hand_landmarks) > 0:
                    landmarks = detection_result.hand_landmarks[0]
-
-
-                   # Si la mano está abierta usamos la muñeca para mover al cazador
-                   #if is_hand_open(landmarks):
+                  
                    # Landmark 0 (muñeca) tiene coords normalizadas [0..1]
                    wrist = landmarks[0]
                    # Convertir a pixeles de pantalla
@@ -908,7 +905,7 @@ def main():
                    current_gun_rotation = get_hand_rotation(landmarks)
 
 
-                   # --- LÓGICA DE DISPARO (NUEVO) ---
+                   # --- LÓGICA DE DISPARO ---
                    # Solo disparamos si detectamos el gesto Y el arma está "fría"
                    if is_shooting_gesture(landmarks) and shot_cooldown <= 0:
                       
@@ -918,7 +915,6 @@ def main():
                       
                        # Matemáticamente, rotamos el punto (0, altura/2) según el ángulo del arma
                        # Pero para simplificar, usaremos la posición del cuerpo del arma + un offset
-                       # Como tu rotación es compleja, una aproximación decente es:
                        spawn_pos = (gun_shape.body.position.x, gun_shape.body.position.y + 50)
                       
                        # 2. Crear la bala
@@ -1002,7 +998,7 @@ def main():
            # --- GESTIÓN DE BALAS ---
            bullets_to_remove = []
            for bullet in bullets:
-               draw_bullet(screen, bullet) # Usamos la función que te di antes
+               draw_bullet(screen, bullet)
               
                # Eliminar balas que salen de la pantalla para liberar memoria
                # (Coordenadas Pymunk: Y aumenta hacia arriba, X igual que pantalla)
@@ -1012,14 +1008,14 @@ def main():
 
 
            for b in bullets_to_remove:
-               space.remove(b.body, b) # Importante: quitar del espacio se
-               bullets.remove(b)       # Quitar de la lista lógica
+               space.remove(b.body, b) 
+               bullets.remove(b)      
       
           
            enemy_bullets_to_remove = []
            for eb in enemy_bullets:
-               # Dibujamos la bala. Puedes usar draw_bullet o crear draw_enemy_bullet
-               # Aquí la pinto negra directamente para diferenciar
+               # Dibujamos la bala.
+               # De color negra directamente para diferenciar
                p = int(eb.body.position.x), display_h - int(eb.body.position.y)
                pygame.draw.circle(screen, (0, 0, 0), p, int(eb.radius))
               
